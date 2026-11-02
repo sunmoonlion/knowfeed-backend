@@ -7,7 +7,7 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.domain.cross_app import Source, Target, parse_sources, parse_targets
@@ -277,6 +277,11 @@ class Settings(BaseSettings):
     # 渲染工作负载（SDD 0045 第 3.2 节「无头浏览器放 knowfeed 自己的一个单独工作负载」；
     # decisions 10-29「发版前补齐」④：工作负载与出网规则由平台起）。地址没配就不渲染，
     # 要渲染的渠道照实回 render_unavailable
+    wind_api_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias="WIND_API_KEY"
+    )
+    wind_owner_subject: str = Field(default="", validation_alias="WIND_OWNER_SUBJECT")
+
     supply_render_url: str = Field(default="", validation_alias="SUPPLY_RENDER_URL")
     supply_render_timeout_seconds: float = Field(
         default=60.0, gt=0, le=300, validation_alias="SUPPLY_RENDER_TIMEOUT_SECONDS"

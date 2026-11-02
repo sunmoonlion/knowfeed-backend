@@ -140,6 +140,20 @@ class SupplyRepository(Protocol):
         """只往前走：结束了的不动；返回改了几项。"""
         ...
 
+    async def claim_provider_query(self, job_id: str) -> bool:
+        """Persist a paid-call intent once; an uncertain attempt must not replay."""
+        ...
+
+    async def clear_provider_query_claim(self, job_id: str) -> None:
+        """Only after a limiter/429 explicitly refused execution."""
+        ...
+
+    async def retained_query_response(
+        self, channel: str, query: str
+    ) -> Original | None:
+        """A fetched response, even if downstream delivery has not succeeded."""
+        ...
+
     async def find_original(self, sha256: str) -> Original | None: ...
 
     async def save_original(

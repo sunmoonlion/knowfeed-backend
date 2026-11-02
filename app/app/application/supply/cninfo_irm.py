@@ -50,7 +50,7 @@ class CninfoIrmCatalog:
         """窗里已回答的问答（新的在前）；这家不在互动易上、窗里没有，都是空。"""
         if "ir_qa" not in types_of(key.doc_type) or key.edition != "full":
             return []
-        code = key.subject.split(".")[0]
+        code = (key.subject or "").split(".")[0]
         secid = await self._secid(code)
         if secid is None:
             return []

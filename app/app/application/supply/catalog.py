@@ -61,6 +61,7 @@ log = logging.getLogger(__name__)
 # 节）：目录型（巨潮、互动易）、通用网页型、订阅源型（RSS、Atom、栏目页）、搜索型（站内搜索）
 PLUGINS: dict[str, str] = {
     "cninfo": "catalog",
+    "wind-mcp": "catalog",
     "cninfo-irm": "catalog",
     "web": "web",
     "feed": "feed",
@@ -146,6 +147,11 @@ class ChannelCatalog:
         _check_plugin(reg)
         now = self.now()
         existing = await self.repo.channels()
+        if reg.plugin == "wind-mcp" and any(c.plugin == "wind-mcp" for c in existing):
+            raise refused(
+                "provider_account_exists",
+                "one channel owns the Wind service account; update its registered capabilities",
+            )
         channel = Channel(
             id=channel_id,
             name=reg.name,
@@ -181,6 +187,7 @@ class ChannelCatalog:
         仅改运维参数的不打回；没有任何实质字段变化时不落空改动（三审第 4 条）。"""
         current = await self.get(channel_id)
         reg = check_registration(registration, _known_types())
+        _check_plugin(reg)
         if (reg.kind, reg.plugin) != (current.kind, current.plugin):
             raise refused("kind_fixed", "register another channel to change its kind")
         _need_reason(reason)
@@ -267,6 +274,13 @@ class ChannelCatalog:
             area = zone or current.zone
             if area not in ZONES:
                 raise refused("zone_invalid", "zone is disclosure or collected")
+            if current.plugin == "wind-mcp" and (
+                chosen != "self" or area != "collected"
+            ):
+                raise refused(
+                    "provider_scope_invalid",
+                    "Wind responses remain private to the account owner",
+                )
             if area == "disclosure" and current.kind != "catalog":
                 raw_subject = current.config.get("subject")
                 subject = raw_subject.strip() if isinstance(raw_subject, str) else ""
@@ -598,6 +612,26 @@ def _allowed(channel: Channel, demand: Demand) -> bool:
 
 
 def _check_plugin(reg: Registration) -> None:
+    if reg.plugin == "wind-mcp":
+        if (
+            reg.zone != "collected"
+            or reg.license != "self"
+            or reg.max_running != 1
+            or set(reg.readings) - {"original", "text"}
+            or set(reg.doc_types) != {"other_text"}
+        ):
+            raise refused(
+                "provider_scope_invalid",
+                "Wind queries require private collected response evidence and serial execution",
+            )
+        if (
+            not isinstance(reg.config.get("owner_subject"), str)
+            or not reg.config["owner_subject"]
+        ):
+            raise refused(
+                "provider_scope_invalid", "Wind channel requires an owner subject"
+            )
+
     kind = PLUGINS.get(reg.plugin)
     if kind is None:
         raise refused("plugin_unknown", f"plugins: {', '.join(sorted(PLUGINS))}")

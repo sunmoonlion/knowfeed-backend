@@ -210,7 +210,7 @@ def wait_for(
     now: datetime,
 ) -> datetime | None:
     """这次能不能问：能就回 None；不能就回最早什么时候能问。"""
-    if fetch and usage.fetched_today >= daily_cap:
+    if fetch and daily_cap > 0 and usage.fetched_today >= daily_cap:
         return next_day(now)
     waits = []
     if usage.channel_minute >= rate_per_minute:
@@ -243,7 +243,7 @@ def estimate_seconds(
     seconds = math.ceil(jobs * REQUESTS_PER_JOB / per_minute * 60) + PROCESS_SECONDS
     need = jobs * FETCHES_PER_JOB
     left_today = max(0, channel.daily_cap - fetched_today)
-    if need > left_today:
+    if channel.daily_cap > 0 and need > left_today:
         days = math.ceil((need - left_today) / max(1, channel.daily_cap))
         until_tomorrow = (next_day(now) - now).total_seconds()
         seconds = int(until_tomorrow) + (days - 1) * 86400 + seconds

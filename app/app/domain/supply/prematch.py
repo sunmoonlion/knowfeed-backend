@@ -36,13 +36,14 @@ class PrematchKeyV1(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    subject: str = Field(min_length=1, max_length=64)
+    subject: str | None = Field(default=None, min_length=1, max_length=64)
     doc_type: str = Field(min_length=1, max_length=32)
     period_start: date | None = None
     period_end: date | None = None
     edition: Literal["full", "summary", "english"] = "full"
     topics: list[str] = Field(default_factory=list, max_length=12)
     industry: str | None = Field(default=None, max_length=16)
+    source_query: dict[str, object] | None = None
 
 
 class PrematchItemV1(BaseModel):

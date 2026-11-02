@@ -33,6 +33,7 @@ from app.domain.supply.models import (
     DescriptionKey,
     SupplyError,
     check_subject,
+    query_json,
 )
 from app.domain.supply.prematch import (
     CandidateV1,
@@ -104,7 +105,8 @@ class PreMatch:
     ) -> PrematchAnswerV1:
         assert item.key is not None
         try:
-            check_subject(item.key.subject, item.key.doc_type)
+            if item.key.source_query is None:
+                check_subject(item.key.subject or "", item.key.doc_type)
         except SupplyError as exc:
             return PrematchAnswerV1(ref=item.ref, status="unavailable", reason=exc.code)
         key = DescriptionKey(
@@ -115,6 +117,7 @@ class PreMatch:
             edition=item.key.edition,
             topics=tuple(item.key.topics),
             industry=item.key.industry,
+            source_query=query_json(item.key.source_query),
         )
         covering, allowed = candidates(channels, key, conditions)
         if not covering:

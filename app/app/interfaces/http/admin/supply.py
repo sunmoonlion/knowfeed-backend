@@ -200,7 +200,7 @@ class RegistrationIn(BaseModel):
     )
     license: Literal["self", "via_expert", "sale"]
     rate_per_minute: int = Field(ge=1)
-    daily_cap: int = Field(ge=1)
+    daily_cap: int = Field(ge=0)
     max_running: int = Field(default=1, ge=1)
     domain: str | None = Field(default=None, max_length=253)
     terms_url: str | None = Field(default=None, max_length=2000)

@@ -27,12 +27,14 @@ from app.application.errors.exceptions import AppException
 from app.application.supply.demands import DemandService
 from app.application.supply.directory import MAX_RESULTS, SecurityDirectory
 from app.application.supply.matching import PreMatch
+from app.application.supply.provider_query import SourceDiscovery
 from app.domain.supply.models import (
     Demand,
     DemandItem,
     DemandItemIn,
     DescriptionKey,
     SupplyError,
+    query_json,
     refused,
     summarize,
 )
@@ -69,6 +71,12 @@ def get_prematch() -> PreMatch:
     return build_prematch(get_postgres().session_factory)
 
 
+def get_source_discovery() -> SourceDiscovery:
+    from app.bootstrap.supply import build_source_discovery
+
+    return build_source_discovery(get_postgres().session_factory)
+
+
 def caller_app(
     caller: ServiceCaller = Depends(require_supply_demand_service),
 ) -> str:
@@ -82,13 +90,14 @@ class DescriptionKeyIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    subject: str = Field(min_length=1, max_length=64)
+    subject: str | None = Field(default=None, min_length=1, max_length=64)
     doc_type: str = Field(min_length=1, max_length=32)
     period_start: date | None = None
     period_end: date | None = None
     edition: Literal["full", "summary", "english"] = "full"
     topics: list[str] = Field(default_factory=list, max_length=12)
     industry: str | None = Field(default=None, max_length=16)
+    source_query: dict[str, object] | None = None
 
 
 class PrefillIn(BaseModel):
@@ -208,6 +217,7 @@ def item_in(i: DemandItemModel) -> DemandItemIn:
             edition=i.key.edition,
             topics=tuple(i.key.topics),
             industry=i.key.industry,
+            source_query=query_json(i.key.source_query),
         )
         if i.key is not None
         else None
@@ -302,3 +312,14 @@ async def prematch(
     预计多久。不问渠道、不看 knowbase，不记任何东西。"""
     answers = await _call(lambda: service.check(app, payload))
     return PrematchResponseV1(items=answers)
+
+
+@router.get("/source-tools")
+async def source_tools(
+    owner: str = Query(min_length=1, max_length=128),
+    service: str | None = Query(default=None, pattern=r"^[a-z][a-z0-9_]{0,63}$"),
+    caller: str = Depends(caller_app),
+    discovery: SourceDiscovery = Depends(get_source_discovery),
+):
+    """Authenticated service discovers its task owner's supplier capabilities."""
+    return await _call(lambda: discovery.discover(owner, service))

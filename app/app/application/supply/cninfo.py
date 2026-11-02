@@ -196,7 +196,7 @@ class CninfoCatalog:
     async def _periodic(self, key: DescriptionKey) -> list[Entry]:
         if key.period_end is None:
             return []
-        code = key.subject.split(".")[0]
+        code = (key.subject or "").split(".")[0]
         org_id = await self._org_id(code)
         category, title_re = _PERIODIC[key.doc_type]
         year = key.period_end.year
@@ -223,7 +223,7 @@ class CninfoCatalog:
         edition = edition_of(title)
         if edition != key.edition:
             return None
-        code = key.subject.split(".")[0]
+        code = (key.subject or "").split(".")[0]
         # 同一份报告的更正版是同一份资料的新版本：编号按报告，不按公告
         doc_id = f"{code}:{key.doc_type}:{year}"
         if edition != "full":
@@ -243,7 +243,7 @@ class CninfoCatalog:
     # —— 其余：一条是一个披露时间窗 ——
 
     async def _window(self, key: DescriptionKey, wanted: set[str]) -> list[Entry]:
-        code = key.subject.split(".")[0]
+        code = (key.subject or "").split(".")[0]
         org_id = await self._org_id(code)
         end = key.period_end or datetime.now(_SHANGHAI).date()
         start = key.period_start or end - DEFAULT_WINDOW

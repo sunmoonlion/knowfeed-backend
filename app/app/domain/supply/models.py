@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -127,19 +128,63 @@ def summarize(statuses: list[str] | set[str]) -> str:
     return sorted(found)[0] if found else "accepted"
 
 
+def query_json(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        value = {k: v for k, v in value.items() if k != "request_id" or v is not None}
+    if not isinstance(value, dict) or set(value) - {"request_id"} != {
+        "channel",
+        "service",
+        "tool",
+        "arguments",
+    }:
+        raise refused(
+            "query_invalid", "query needs channel, service, tool and arguments"
+        )
+    if "request_id" in value and (
+        not isinstance(value["request_id"], str)
+        or not re.fullmatch(r"[a-f0-9]{32}", value["request_id"])
+    ):
+        raise refused("query_invalid", "invalid query request identity")
+    for name, pattern in (
+        ("channel", r"[a-z][a-z0-9-]{1,39}"),
+        ("service", r"[a-z][a-z0-9_]{0,63}"),
+        ("tool", r"[a-z][a-z0-9_]{0,99}"),
+    ):
+        if not isinstance(value[name], str) or not re.fullmatch(pattern, value[name]):
+            raise refused("query_invalid", "invalid query route")
+    if not isinstance(value["arguments"], dict) or len(value["arguments"]) > 50:
+        raise refused("query_invalid", "query arguments must be an object")
+    try:
+        canonical = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError):
+        raise refused("query_invalid", "query must be JSON") from None
+    if len(canonical.encode()) > 20000:
+        raise refused("query_invalid", "query is too large")
+    return canonical
+
+
 @dataclass(frozen=True)
 class DescriptionKey:
     """一条描述（词表同 knowbase，SDD 0049）：主体 × 类型 × 期间 × 版本形态，外加缩小
     范围的事项、行业。类型可以是细类或大类；定期报告的期间是报告期（一条对一份），
     其余类型的期间是披露时间窗（一条对窗里的一批）。缺省值不写进字典。"""
 
-    subject: str
+    subject: str | None
     doc_type: str
     period_start: date | None = None
     period_end: date | None = None
     edition: str = "full"
     topics: tuple[str, ...] = ()
     industry: str | None = None
+    source_query: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         out: dict[str, object] = {
@@ -156,6 +201,8 @@ class DescriptionKey:
             out["topics"] = list(self.topics)
         if self.industry is not None:
             out["industry"] = self.industry
+        if self.source_query is not None:
+            out["source_query"] = json.loads(self.source_query)
         return out
 
     @staticmethod
@@ -163,7 +210,8 @@ class DescriptionKey:
         start, end = data.get("period_start"), data.get("period_end")
         topics = data.get("topics") or ()
         return DescriptionKey(
-            subject=str(data["subject"]),
+            subject=str(data["subject"]) if data.get("subject") else None,
+            source_query=query_json(data.get("source_query")),
             doc_type=str(data["doc_type"]),
             period_start=date.fromisoformat(str(start)) if start else None,
             period_end=date.fromisoformat(str(end)) if end else None,
@@ -181,6 +229,7 @@ class DescriptionKey:
         return (
             f"{self.subject}|{self.doc_type}|{self.period_start}|{self.period_end}"
             + extra
+            + ("|query:" + self.source_query if self.source_query else "")
         )
 
 
@@ -296,7 +345,20 @@ def check_demand(
         if (item.key is None) == (item.url is None):
             raise refused("item_invalid", "give either a description or a URL")
         if item.key is not None:
-            check_subject(item.key.subject, item.key.doc_type)
+            if item.key.source_query:
+                query_json(json.loads(item.key.source_query))
+                if (
+                    item.key.doc_type != "other_text"
+                    or item.key.period_start
+                    or item.key.period_end
+                    or set(item.readings) - {"original", "text"}
+                ):
+                    raise refused(
+                        "query_invalid",
+                        "supplier response is text evidence, not a report original",
+                    )
+            else:
+                check_subject(item.key.subject or "", item.key.doc_type)
         elif not item.url or len(item.url) > MAX_URL:
             raise refused("url_invalid", f"a URL of at most {MAX_URL} characters")
         if not item.readings or any(r not in READINGS for r in item.readings):
@@ -363,9 +425,15 @@ class Channel:
 
         暂停的渠道照样接：作业等着，恢复后接着跑，不让需求因为一时取不到变成缺口。
         配置里写了 `markets`（如互动易只有深市公司）的，主体的市场要在里面。"""
+        if key.source_query:
+            query = json.loads(key.source_query)
+            if query["channel"] != self.id or self.plugin != "wind-mcp":
+                return False
+        elif self.plugin == "wind-mcp":
+            return False
         markets = self.config.get("markets")
         if isinstance(markets, list) and markets:
-            if key.subject.rsplit(".", 1)[-1] not in markets:
+            if (key.subject or "").rsplit(".", 1)[-1] not in markets:
                 return False
         return (
             self.status in ("active", "paused")
@@ -391,6 +459,8 @@ class Entry:
     topics: tuple[str, ...] = ()
     subject: str | None = None  # 订阅源、网页的主体（渠道登记写的，或用户预填的）
 
+    source_query: str | None = None
+
     def as_dict(self) -> dict[str, object]:
         """进作业的载荷、订阅的发现记录（订阅每轮已知条目，作业不必再「列」）。"""
         return {
@@ -407,6 +477,11 @@ class Entry:
             "edition": self.edition,
             "topics": list(self.topics),
             "subject": self.subject,
+            **(
+                {"source_query": json.loads(self.source_query)}
+                if self.source_query
+                else {}
+            ),
         }
 
     @staticmethod
@@ -414,6 +489,7 @@ class Entry:
         disclosed = data.get("disclosed_on")
         topics = data.get("topics") or ()
         return Entry(
+            source_query=query_json(data.get("source_query")),
             channel_id=str(data["channel_id"]),
             channel_doc_id=str(data["channel_doc_id"]),
             title=str(data.get("title") or ""),

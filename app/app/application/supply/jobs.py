@@ -247,6 +247,12 @@ class JobRunner:
             await self._finish(job, attempt, "failed", reason, "failed", token=token)
             return "failed"
         except SupplyError as exc:
+            if exc.code.startswith("provider_") and exc.status != 429:
+                await self._end_job(job, "failed", exc.code)
+                await self._finish(
+                    job, attempt, "failed", exc.code, "failed", token=token
+                )
+                return "failed"
             if exc.status == 429:
                 return await self._defer(
                     job,
@@ -440,6 +446,8 @@ class JobRunner:
         except ChannelDeferred:
             raise
         except SupplyError as exc:
+            if exc.code.startswith("provider_"):
+                raise
             if exc.status == 429:
                 raise
             if exc.status >= 500:
@@ -466,7 +474,24 @@ class JobRunner:
 
     # —— 取数作业 ——
 
+    async def _provider_waiting(
+        self, channel: Channel, waiting: list[tuple[DemandItem, Demand]]
+    ) -> list[tuple[DemandItem, Demand]]:
+        owner = channel.config.get("owner_subject")
+        if not owner:
+            return waiting
+        forbidden = [i.id for i, d in waiting if d.owner != owner]
+        if forbidden:
+            await self.repo.settle_items(
+                forbidden, "failed", self.now(), reason="provider_owner_forbidden"
+            )
+        return [(i, d) for i, d in waiting if d.owner == owner]
+
     async def _fetch_and_deliver(self, job: Job, channel: Channel) -> str:
+        if not await self._provider_waiting(
+            channel, await self.repo.waiting_items(job.id)
+        ):
+            return "done"
         plugin = self.plugins(channel)
         if plugin is None:
             raise SupplyError(503, "plugin_unavailable", "no plugin for the channel")
@@ -491,11 +516,17 @@ class JobRunner:
         # 定期报告：新的在前，更正版是同一份资料的新版本，交最新那一条
         periodic = key is not None and is_periodic(key.doc_type)
         chosen = entries[:1] if periodic else entries
-        waiting = await self.repo.waiting_items(job.id)
+        waiting = await self._provider_waiting(
+            channel, await self.repo.waiting_items(job.id)
+        )
+        if not waiting:
+            return "done"
         parts: dict[str, list[dict[str, object]]] = {i.id: [] for i, _ in waiting}
         readings: set[str] | None = None
         for entry in chosen:
-            got, done = await self._deliver_one(channel, plugin, entry, key, waiting)
+            got, done = await self._deliver_one(
+                channel, plugin, entry, key, waiting, job=job
+            )
             for item_id, part in got.items():
                 parts.setdefault(item_id, []).append(part)
             readings = done if readings is None else readings & done
@@ -627,6 +658,8 @@ class JobRunner:
         entry: Entry,
         key: DescriptionKey | None,
         waiting: list[tuple[DemandItem, Demand]],
+        *,
+        job: Job | None = None,
     ) -> tuple[dict[str, dict[str, object]], set[str]]:
         """取一份、留存、交 knowbase、加工；回（各项回执里的这一份，就绪的读法）。"""
         if channel.zone == "disclosure" and not is_periodic(entry.doc_type):
@@ -655,7 +688,36 @@ class JobRunner:
                     done,
                 )
                 return {i.id: part for i, _ in waiting}, done
-        content, media_type = await self._ask_channel(channel, plugin.fetch(entry))
+        if channel.plugin == "wind-mcp":
+            assert job is not None
+            saved = await self.repo.retained_query_response(
+                channel.id, entry.channel_doc_id
+            )
+            if saved is not None:
+                content, media_type = (
+                    await self.objects.get(saved.object_key),
+                    saved.media_type,
+                )
+            else:
+                if not await self.repo.claim_provider_query(job.id):
+                    raise SupplyError(
+                        409,
+                        "provider_outcome_unknown",
+                        "previous supplier call has no retained response; automatic replay disabled",
+                    )
+                try:
+                    content, media_type = await self._ask_channel(
+                        channel, plugin.fetch(entry)
+                    )
+                except ChannelDeferred:
+                    await self.repo.clear_provider_query_claim(job.id)
+                    raise
+                except SupplyError as exc:
+                    if exc.status == 429:
+                        await self.repo.clear_provider_query_claim(job.id)
+                    raise
+        else:
+            content, media_type = await self._ask_channel(channel, plugin.fetch(entry))
         return await self._deliver_content(
             channel, entry, content, media_type, key, waiting
         )
@@ -675,6 +737,9 @@ class JobRunner:
         - 为用户采集（`collected`）：走 knowbase「为某用户采集」那条路，内容存一份，每位
           受益人各得一份自己名下的资料，描述用他自己的预填；那条路没上之前不交付。
         回（各项回执里的这一份，就绪的读法）。"""
+        waiting = await self._provider_waiting(channel, waiting)
+        if not waiting:
+            return {}, set()
         original = await self._keep(entry, content, media_type)
         name = _file_name(entry, media_type)
         facts = (

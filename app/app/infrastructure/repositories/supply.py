@@ -659,6 +659,44 @@ class SqlSupplyRepository:
                 return None
             return _original(row[0]), _delivery(row[1])
 
+    async def claim_provider_query(self, job_id: str) -> bool:
+        async with self._sessions()() as session, session.begin():
+            job = await session.get(SupplyJob, uuid.UUID(job_id), with_for_update=True)
+            if (
+                job is None
+                or job.status != "running"
+                or job.payload.get("provider_query_started")
+            ):
+                return False
+            job.payload = {**job.payload, "provider_query_started": True}
+            return True
+
+    async def clear_provider_query_claim(self, job_id: str) -> None:
+        async with self._sessions()() as session, session.begin():
+            job = await session.get(SupplyJob, uuid.UUID(job_id), with_for_update=True)
+            if job is not None:
+                job.payload = {
+                    k: v
+                    for k, v in job.payload.items()
+                    if k != "provider_query_started"
+                }
+
+    async def retained_query_response(
+        self, channel: str, query: str
+    ) -> Original | None:
+        async with self._sessions()() as session:
+            row = await session.scalar(
+                select(SupplyOriginal)
+                .where(
+                    SupplyOriginal.channel_id == channel,
+                    SupplyOriginal.channel_doc_id == query,
+                    SupplyOriginal.purged_at.is_(None),
+                )
+                .order_by(SupplyOriginal.fetched_at.desc())
+                .limit(1)
+            )
+            return _original(row) if row is not None else None
+
     async def find_original(self, sha256: str) -> Original | None:
         async with self._sessions()() as session:
             row = await session.scalar(

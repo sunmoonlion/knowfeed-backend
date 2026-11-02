@@ -716,3 +716,31 @@ async def test_questions_and_answers_are_delivered_as_text_and_not_fetched_twice
     assert w.knowbase.calls[-1] == ("references", [("bob", f"demand:{d2.id}:c1")])
     _, items = await w.demands.get("knowbench", d2.id)
     assert items[0].status == "ready"
+
+
+async def test_unlimited_daily_cap_keeps_rate_limits_and_counts_real_requests(db):
+    w = World(db)
+    for _ in range(8):
+        assert (
+            await w.schedule.take(
+                "cninfo",
+                fetch=True,
+                rate_per_minute=1,
+                daily_cap=0,
+                global_rate=100,
+                now=w.clock.now,
+            )
+            is None
+        )
+        assert (
+            await w.schedule.take(
+                "cninfo",
+                fetch=True,
+                rate_per_minute=1,
+                daily_cap=0,
+                global_rate=100,
+                now=w.clock.now,
+            )
+            is not None
+        )
+        w.clock.now += timedelta(minutes=2)

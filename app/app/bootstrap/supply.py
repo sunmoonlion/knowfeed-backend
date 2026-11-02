@@ -17,6 +17,7 @@ from app.application.supply.matching import PreMatch
 from app.application.supply.mine import MyDemands
 from app.application.supply.monitor import SupplyMonitor
 from app.application.supply.notify import StatusNotifier
+from app.application.supply.provider_query import ProviderCatalog, SourceDiscovery
 from app.application.supply.retention import OriginalRetention
 from app.application.supply.scheduler import (
     ChannelLimiter,
@@ -37,6 +38,7 @@ from app.infrastructure.external.knowbase_supply import (
 )
 from app.infrastructure.external.knowbase_user import HttpKnowbaseUser
 from app.infrastructure.external.render_client import HttpRenderer
+from app.infrastructure.external.wind import TOOLS, HttpWind
 from app.infrastructure.repositories.supply import SqlSupplyRepository
 from app.infrastructure.repositories.supply_catalog import SqlCatalogRepository
 from app.infrastructure.repositories.supply_directory import SqlDirectoryRepository
@@ -89,11 +91,36 @@ def renderer() -> HttpRenderer:
 class ChannelPlugins:
     """按渠道建插件：插件不自带网络客户端，用框架给的、按这条渠道限速的 Http。"""
 
-    def __init__(self, http: Http, limiter: ChannelLimiter) -> None:
+    def __init__(
+        self, http: Http, limiter: ChannelLimiter, repo=None, *, trial: bool = False
+    ) -> None:
+        self._repo = repo
+        self._trial = trial
         self._http = http
         self._limiter = limiter
 
     def __call__(self, channel: Channel) -> Catalog | None:
+        if channel.plugin == "wind-mcp":
+            if self._repo is None:
+                return None
+            settings = get_settings()
+            if (
+                not settings.wind_owner_subject
+                or channel.config.get("owner_subject") != settings.wind_owner_subject
+            ):
+                return None
+            adapter = ProviderCatalog(
+                HttpWind(settings.wind_api_key), channel, self._repo, trial=self._trial
+            )
+
+            async def before_request(method: str) -> None:
+                current = await adapter.current_channel()
+                await self._limiter.acquire(current, fetch=method == "tools/call")
+
+            adapter.client = HttpWind(
+                settings.wind_api_key, before_request=before_request
+            )
+            return adapter
         factory = PLUGIN_FACTORIES.get(channel.plugin)
         if factory is None:
             return None
@@ -162,6 +189,14 @@ def build_subscriptions(
     )
 
 
+def build_source_discovery(
+    sessions: async_sessionmaker[AsyncSession],
+) -> SourceDiscovery:
+    return SourceDiscovery(
+        SqlSupplyRepository(lambda: sessions), _plugins(sessions), sorted(TOOLS)
+    )
+
+
 def build_prematch(sessions: async_sessionmaker[AsyncSession]) -> PreMatch:
     return PreMatch(
         SqlSupplyRepository(lambda: sessions),
@@ -180,7 +215,9 @@ def build_monitor(sessions: async_sessionmaker[AsyncSession]) -> SupplyMonitor:
 
 
 def build_trial_runner(sessions: async_sessionmaker[AsyncSession]) -> TrialRunner:
-    return TrialRunner(SqlCatalogRepository(lambda: sessions), _plugins(sessions))
+    return TrialRunner(
+        SqlCatalogRepository(lambda: sessions), _plugins(sessions, trial=True)
+    )
 
 
 def build_retention(sessions: async_sessionmaker[AsyncSession]) -> OriginalRetention:
@@ -242,12 +279,16 @@ def _crawl_http() -> CrawlHttp:
     )
 
 
-def _plugins(sessions: async_sessionmaker[AsyncSession]) -> ChannelPlugins:
+def _plugins(
+    sessions: async_sessionmaker[AsyncSession], *, trial: bool = False
+) -> ChannelPlugins:
     limiter = ChannelLimiter(
         SqlScheduleRepository(lambda: sessions),
         global_rate=get_settings().supply_global_rate_per_minute,
     )
-    return ChannelPlugins(_crawl_http(), limiter)
+    return ChannelPlugins(
+        _crawl_http(), limiter, SqlSupplyRepository(lambda: sessions), trial=trial
+    )
 
 
 def _reader() -> HttpKnowbaseReader | None:

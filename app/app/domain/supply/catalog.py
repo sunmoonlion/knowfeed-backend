@@ -199,8 +199,10 @@ def check_registration(reg: Registration, known_types: frozenset[str]) -> Regist
         raise refused("readings_invalid", "readings are original/text/pages/table")
     if not 1 <= reg.rate_per_minute <= MAX_RATE_PER_MINUTE:
         raise refused("rate_invalid", f"rate is 1 to {MAX_RATE_PER_MINUTE} a minute")
-    if not 1 <= reg.daily_cap <= MAX_DAILY_CAP:
-        raise refused("daily_cap_invalid", f"daily cap is 1 to {MAX_DAILY_CAP}")
+    if not 0 <= reg.daily_cap <= MAX_DAILY_CAP:
+        raise refused(
+            "daily_cap_invalid", f"daily cap is 0 (unlimited) to {MAX_DAILY_CAP}"
+        )
     if not 1 <= reg.max_running <= MAX_RUNNING:
         raise refused("max_running_invalid", f"max running is 1 to {MAX_RUNNING}")
     domain = check_domain(reg.domain) if reg.domain else None
