@@ -792,72 +792,88 @@ class JobRunner:
                     found = candidates_for_owner[0]
             if (
                 found is not None
+                and found.get("subject") == demand.owner
                 and found.get("material_id") is not None
                 and found.get("version_no") is not None
             ):
                 materials[item.id] = found
 
-        # 判断哪些受益人副本已有读法、哪些还需要加工（三审第 2 条）
-        needs_processing: list[dict[str, Any]] = []
+        # 私有资料各有内容版本与授权，不把一人的加工结果记到别人的副本。
+        wanted: dict[str, set[str]] = {}
+        for item, _ in waiting:
+            found = materials.get(item.id)
+            if found is not None:
+                wanted.setdefault(str(found["material_id"]), set()).update(
+                    item.readings
+                )
         copy_readings: dict[str, set[str]] = {}
-        for a in answered:
-            mid = str(a.get("material_id") or "")
-            given_readings = a.get("readings")
-            has_readings = a.get("has_readings")
-            if isinstance(given_readings, list) and given_readings:
-                copy_readings[mid] = {str(r) for r in given_readings} | {"original"}
-            elif has_readings is True:
-                copy_readings[mid] = _expected_readings(media_type, facts)
-            elif bool(a.get("created")) or has_readings is False:
-                needs_processing.append(a)
-            else:
-                needs_processing.append(a)
-
         processed_done = {"original"}
-        if needs_processing:
-            # 按受益人顺序尝试领授权：若第一位受益人已撤回资料/拒绝授权（4xx），换下一位重试
-            order = [
-                *needs_processing,
-                *[a for a in answered if a not in needs_processing],
-            ]
-            for cand in order:
-                cand_mid = str(cand["material_id"])
-                cand_vno = int(cand["version_no"])
-                cand_owner = str(cand.get("subject") or "")
-                try:
-                    grant = await self.knowbase.processing_grant(
-                        cand_mid, cand_vno, owner=cand_owner
+        for a in materials.values():
+            mid = str(a.get("material_id") or "")
+            if mid not in wanted or mid in copy_readings:
+                continue
+            given = a.get("readings")
+            # 旧提供方无逐读法回执，只能确认原件，不能由 has_readings 推断齐全。
+            if given is None:
+                ready: set[str] = set()
+            elif isinstance(given, list) and all(
+                isinstance(r, str)
+                and r in {"original", "text", "pages", "table", "index", "parse"}
+                for r in given
+            ):
+                ready = set(given)
+            else:
+                raise SupplyError(
+                    502, "unexpected_response", "invalid collected readings"
+                )
+            ready.add("original")
+            copy_readings[mid] = ready
+            missing = wanted[mid] - ready
+            if not missing:
+                continue
+            owner = str(a.get("subject") or "")
+            try:
+                grant = await self.knowbase.processing_grant(
+                    mid, int(a["version_no"]), owner=owner
+                )
+            except SupplyError as exc:
+                if exc.status in (403, 404, 409, 422):
+                    log.warning(
+                        "supply_collected_grant_skipped owner=%s material=%s code=%s",
+                        owner,
+                        mid,
+                        exc.code,
                     )
-                except SupplyError as exc:
-                    if exc.status in (403, 404, 409, 422):
-                        log.warning(
-                            "supply_collected_grant_skipped owner=%s material=%s code=%s",
-                            cand_owner,
-                            cand_mid,
-                            exc.code,
-                        )
-                        continue
-                    raise
-                try:
-                    processed_done |= await self._process(
+                    continue
+                raise
+            try:
+                # 每种读法分别确认成功；后续写入被拒不能丢掉已经成功的回执。
+                for reading in sorted(missing):
+                    ready |= await self._process(
                         grant,
-                        cand_mid,
+                        mid,
                         content,
                         media_type,
                         key if facts else None,
                         title=entry.title,
                         published_on=entry.disclosed_on,
+                        needed={reading},
                     )
-                finally:
-                    await self._release(grant)
-                for a in answered:
-                    amid = str(a.get("material_id") or "")
-                    copy_readings[amid] = set(processed_done)
-                break
+            except SupplyError as exc:
+                if exc.status not in (403, 404, 409, 422):
+                    raise
+                log.warning(
+                    "supply_collected_write_refused owner=%s material=%s code=%s",
+                    owner,
+                    mid,
+                    exc.code,
+                )
+            finally:
+                await self._release(grant)
 
         deliveries: list[OriginalDelivery] = []
         seen_owners: set[str] = set()
-        for a in answered:
+        for a in materials.values():
             amid = str(a.get("material_id") or "")
             avno = int(a.get("version_no") or 1)
             aowner = str(a.get("subject") or "")
@@ -935,6 +951,7 @@ class JobRunner:
         facts_key: DescriptionKey | None,
         *,
         recognize: bool = False,
+        needed: set[str] | None = None,
         title: str | None = None,
         published_on: date | None = None,
     ) -> set[str]:
@@ -944,18 +961,26 @@ class JobRunner:
         form = form_of(media_type)
         done: set[str] = set()
         if form == "pdf":
-            pages = await self._write_pages(grant, material_id, content)
+            pages = (
+                await self._write_pages(grant, material_id, content)
+                if needed is None or "pages" in needed or recognize
+                else None
+            )
             if pages is not None:
                 done.add("pages")
             if recognize and facts_key is None and pages is not None:
                 # 上传的 PDF 没有渠道给的描述：从封面认是不是定期报告全文
                 facts_key = recognize_periodic(pages)
-            if facts_key is not None and await self._write_facts(
-                grant, material_id, content, facts_key
+            if (
+                (needed is None or "table" in needed)
+                and facts_key is not None
+                and await self._write_facts(grant, material_id, content, facts_key)
             ):
                 done.add("table")
             return done
         if form in ("html", "text"):
+            if needed is not None and "text" not in needed:
+                return done
             try:
                 reading = await asyncio.to_thread(
                     text_reading,
@@ -1188,15 +1213,6 @@ def _default_description(entry: Entry, key: DescriptionKey | None) -> dict[str, 
         "topics": list(entry.topics),
         "confirmed": False,
     }
-
-
-def _expected_readings(media_type: str, facts: bool) -> set[str]:
-    form = form_of(media_type)
-    if form == "pdf":
-        return {"original", "pages", "table"} if facts else {"original", "pages"}
-    if form in ("html", "text"):
-        return {"original", "text"}
-    return {"original"}
 
 
 def _url_title(url: str, filename: object = None) -> str:

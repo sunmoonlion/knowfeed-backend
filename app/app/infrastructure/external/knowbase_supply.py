@@ -71,7 +71,9 @@ class HttpKnowbase:
         渠道审定的许可档、出处、文件名；multipart：`file` 是原件字节，`beneficiaries`
         是 JSON `[{subject, prefill, item_ref, basis}]`（预填的描述只用在这个人自己那份），
         `default_description` 是渠道条目给的未确认候选描述（`confirmed: false`）。回
-        `[{subject, material_id, version_no, created, has_readings, readings}]`。knowbase
+        `[{subject, item_ref, material_id, version_no, created, has_readings, readings,
+        renditions}]`。readings 是已就绪的种类，renditions 是对应版本引用；旧方缺字段
+        时不能由 has_readings 推断全齐，只能补加工本人所需读法。knowbase
         这条路没上（404、405）抛 409 `awaiting_knowbase`，调用方不交付，绝不改走公开原件层。"""
         data: dict[str, str] = {
             "beneficiaries": json.dumps(beneficiaries, ensure_ascii=False)

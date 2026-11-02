@@ -198,12 +198,13 @@ async def test_item_2_and_11_collected_grant_fallback_and_missing_beneficiary_fa
     w.knowbase.processing_grant = grant_refuse_alice  # type: ignore[method-assign]
 
     assert await w.runner.run(job) == "done"
-    # 换用第二位受益人 bob 的授权完成了加工
+    # bob 的授权只完成 bob 自己的加工，不能替 alice 的私有版本标齐。
     assert ("grant", "bob") in w.knowbase.calls
     _, got_a = await w.demands.get("knowbench", d_alice.id)
     _, got_b = await w.demands.get("knowbench", d_bob.id)
     _, got_c = await w.demands.get("knowbench", d_carol.id)
-    assert got_a[0].status == "ready" and got_b[0].status == "ready"
+    assert got_a[0].status == "partial" and got_b[0].status == "ready"
+    assert got_a[0].receipt["readings"] == ["original"]
     # carol 因回包缺失标为 failed:unexpected_response，绝不标成空回执 ready
     assert (got_c[0].status, got_c[0].reason, got_c[0].receipt) == (
         "failed",

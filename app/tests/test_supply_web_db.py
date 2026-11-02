@@ -191,10 +191,11 @@ async def test_a_url_on_a_new_site_waits_for_review_then_is_fetched(db):
     _, bobs = await w.demands.get("knowbench", other[0].demand_id)
     assert items[0].receipt["material_id"] != bobs[0].receipt["material_id"]
     assert not any(c[0] == "references" for c in w.knowbase.calls)
-    # 加工一次，用第一位受益人那份的授权
+    # 同一内容只取一次，各私有版本分别凭本人的授权加工。
     assert ("grant", "alice") in w.knowbase.calls
+    assert ("grant", "bob") in w.knowbase.calls
     # 加工授权用完交还（独立审第 11 条）
-    assert w.reader.released == ["g-1"]
+    assert w.reader.released == ["g-1", "g-1"]
 
 
 async def test_follow_links_takes_at_most_twenty_files_and_reports_the_rest(db):

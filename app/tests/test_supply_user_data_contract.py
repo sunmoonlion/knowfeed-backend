@@ -38,6 +38,49 @@ class Token:
         return "synthetic-contract-token"
 
 
+async def test_collected_receipt_keeps_partial_readings_and_version_references():
+    receipt = {
+        "subject": "alice",
+        "item_ref": "confirmed:item-1",
+        "material_id": "material-1",
+        "version_no": 2,
+        "created": False,
+        "has_readings": True,
+        "readings": ["text"],
+        "renditions": [
+            {
+                "kind": "text",
+                "rendition_no": 3,
+                "sha256": "a" * 64,
+                "processor": "knowfeed",
+                "processor_version": "text-1",
+            }
+        ],
+    }
+    validator("CollectedOriginalRead").validate(receipt)
+
+    async def receive(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/service/collected-originals")
+        return httpx.Response(201, json=[receipt])
+
+    client = HttpKnowbase(
+        "https://knowbase.internal",
+        Token(),
+        5.0,
+        transport=httpx.MockTransport(receive),
+    )
+    got = await client.deliver_collected(
+        channel="synthetic",
+        channel_doc_id="document-1",
+        name="sample.txt",
+        content=b"synthetic evidence",
+        license="self",
+        source_url="https://example.org/sample",
+        beneficiaries=[{"subject": "alice", "item_ref": "confirmed:item-1"}],
+    )
+    assert got == [receipt]
+
+
 async def test_empty_pdf_labels_do_not_reject_valid_facts_or_shift_provenance():
     facts = StatementFacts()
     statement = ExtractedStatement(
