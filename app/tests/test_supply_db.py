@@ -237,7 +237,11 @@ async def refused(work, status: int, code: str) -> None:
 def test_annual_statements_become_raw_and_standard_facts():
     facts = statements_from_pages(pages("000858-2025"), KEY)
     # 夹具只裁了报表页，附注里的补充资料不在里面
-    assert facts.problems == ["supplement_not_found"]
+    assert len([p for p in facts.problems if p.startswith("empty_label:")]) == 4
+    assert [p for p in facts.problems if not p.startswith("empty_label:")] == [
+        "supplement_not_found"
+    ]
+    assert all(str(r["label"]).strip() for r in facts.raw)
     by_code = {
         (s["code"], s["period_end"]): Decimal(s["value"]) for s in facts.standard
     }

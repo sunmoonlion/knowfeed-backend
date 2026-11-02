@@ -35,7 +35,7 @@ from app.domain.securities.report_statements import (
 from app.domain.supply.models import DescriptionKey
 
 PAGES_VERSION = "pages-pdfplumber-1"
-FACTS_VERSION = "periodic-statements-1"
+FACTS_VERSION = "periodic-statements-2"
 RULE = "knowfeed-periodic-statements-1:catalog-label"
 
 # 旧目录的字段 → knowbase 科目表（第 1 版）的编码；锁测试核这些编码在 knowbase 的科目表里
@@ -262,9 +262,19 @@ def _one(
     duration: str,
 ) -> None:
     label = _STATEMENT_LABELS[name]
+    resolution = resolve(name, statement.rows)
+    source_labels = {
+        id(line.row): line.source_label for line in resolution.lines.values()
+    }
     # 每一行原样进原样层（本期一行、上期一行）；记下每个下标，标准化层引用它
     index: dict[tuple[int, str], int] = {}
     for n, row in enumerate(statement.rows):
+        # 数字可能单独排在一行。只用现有解析器唯一匹配到的相邻原文补齐，
+        # 无法识别的空标题留下诊断；不拿目录名称伪装原文。
+        raw_label = row.label if row.label.strip() else source_labels.get(id(row), "")
+        if not raw_label:
+            out.problems.append(f"empty_label:{name}:{row.page}:{n + 1}")
+            continue
         for column, period_end, value in (
             ("current", current_end, row.current),
             ("prior", prior_end, row.prior),
@@ -274,7 +284,7 @@ def _one(
             index[(n, column)] = len(out.raw)
             out.raw.append(
                 {
-                    "label": row.label[:200],
+                    "label": raw_label[:200],
                     "value": str(value),
                     "unit": statement.unit,
                     "period_end": period_end.isoformat(),
@@ -289,7 +299,6 @@ def _one(
         # 单位不是报表页上写明的：原样照给，标准化（换算到元）要参照数核过才敢做
         out.problems.append(f"unit_not_on_statement:{name}:{statement.unit_source}")
         return
-    resolution = resolve(name, statement.rows)
     rows = list(statement.rows)
     for field_name, line in resolution.lines.items():
         code = FIELD_TO_CODE.get(field_name)

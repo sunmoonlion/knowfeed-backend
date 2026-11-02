@@ -130,7 +130,11 @@ def resolve(statement: str, rows: Sequence[ExtractedRow]) -> Resolution:
         if name is None:
             unmatched.append(normalize(own) or "（无标签）")
             continue
-        found[name] = None if name in found else ResolvedLine(name, row, 1 + len(taken))
+        found[name] = (
+            None
+            if name in found
+            else ResolvedLine(name, row, 1 + len(taken), candidate)
+        )
     return Resolution(
         {k: v for k, v in found.items() if v is not None},
         tuple(k for k, v in found.items() if v is None),

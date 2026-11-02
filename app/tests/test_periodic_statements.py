@@ -131,7 +131,10 @@ def test_a_periodic_report_gives_its_periods_and_durations(name):
     facts = statements_from_pages(pages, key)
     # 半年报的夹具只裁了报表页，附注里的补充资料不在里面
     supplement = REPORT_SHAPES[key.doc_type].supplement
-    assert facts.problems == (["supplement_not_found"] if supplement else [])
+    assert [p for p in facts.problems if not p.startswith("empty_label:")] == (
+        ["supplement_not_found"] if supplement else []
+    )
+    assert all(str(r["label"]).strip() for r in facts.raw)
     flow, values = EXPECTED[name]
     end = key.period_end
     year_end = date(end.year - 1, 12, 31)
@@ -276,7 +279,9 @@ def test_the_supplement_rows_become_facts_with_the_report_s_periods():
     _, supplement_pages = fixture("300750-semiannual_report-2025-06-30-supplement")
     key = DescriptionKey("300750.SZ", "semiannual_report", None, date(2025, 6, 30))
     facts = statements_from_pages(statement_pages + supplement_pages, key)
-    assert facts.problems == []
+    assert len(facts.problems) == 25
+    assert all(p.startswith("empty_label:") for p in facts.problems)
+    assert all(str(r["label"]).strip() for r in facts.raw)
     got = {
         (s["code"], s["period_end"], s["duration"]): s["value"]
         for s in facts.standard

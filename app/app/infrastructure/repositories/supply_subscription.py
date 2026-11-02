@@ -12,9 +12,11 @@ import uuid
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import date, datetime, time
+from typing import cast
 
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.supply.models import (
@@ -348,7 +350,7 @@ class SqlSubscriptionRepository:
                 )
                 .values(channels={"search": search_id}, updated_at=at)
             )
-            return bool(result.rowcount)
+            return bool(cast(CursorResult, result).rowcount)
 
     async def open_jobs(self, dedup_keys: list[str]) -> int:
         if not dedup_keys:
@@ -573,7 +575,7 @@ class SqlSubscriptionRepository:
                     )
                     .on_conflict_do_nothing()
                 )
-                made += int(result.rowcount or 0)
+                made += int(cast(CursorResult, result).rowcount or 0)
             await session.execute(
                 insert(SupplyWatchCursor)
                 .values(
@@ -596,7 +598,7 @@ class SqlSubscriptionRepository:
             result = await session.execute(
                 delete(SupplyDiscovery).where(SupplyDiscovery.found_at < before)
             )
-            return int(result.rowcount or 0)  # type: ignore[attr-defined]
+            return int(cast(CursorResult, result).rowcount or 0)
 
     # —— 按主题找 ——
 
@@ -773,7 +775,7 @@ class SqlSubscriptionRepository:
                 )
                 .values(status="ended")
             )
-            return bool(result.rowcount)
+            return bool(cast(CursorResult, result).rowcount)
 
     async def restore_search_ready(self, search_id: str) -> None:
         key = _uuid(search_id)
@@ -796,7 +798,7 @@ class SqlSubscriptionRepository:
                 .where(SupplySearch.status == "ready", SupplySearch.expires_at <= now)
                 .values(status="ended", note="expired")
             )
-            changed = int(result.rowcount or 0)
+            changed = int(cast(CursorResult, result).rowcount or 0)
             searching = (
                 (
                     await session.execute(
@@ -838,7 +840,6 @@ class SqlSubscriptionRepository:
                             job.status = "failed"
                             job.last_error = REASON_CHANNEL_DISABLED
                             job.finished_at = now
-                            job.updated_at = now
                             job.dispatch_token = None
                             job.dispatched_at = None
                         else:

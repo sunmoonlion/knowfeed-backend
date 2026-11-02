@@ -99,6 +99,7 @@ class ResolvedLine:
     field: str
     row: ExtractedRow
     label_lines: int  # 科目名占了几行（折行时大于 1）
+    source_label: str  # 实际匹配的相邻原文；不是科目目录里的展示名
 
 
 @dataclass(frozen=True)

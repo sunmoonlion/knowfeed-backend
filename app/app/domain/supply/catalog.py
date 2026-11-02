@@ -111,7 +111,9 @@ def url_job(
         )
     else:
         actual_job_id = site_or_id
-        site = url_or_site  # type: ignore[assignment]
+        if not isinstance(url_or_site, Channel):
+            raise ValueError("url_job requires a channel")
+        site = url_or_site
         target_url = url or ""
         actual_now = now or datetime.now(UTC)
         follow_val = (

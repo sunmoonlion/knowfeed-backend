@@ -396,7 +396,7 @@ class Knowbase(Protocol):
         ...
 
     async def add_references(
-        self, material_id: str, version_no: int, references: list[tuple[str, str]]
+        self, material_id: str, version_no: int, references: Sequence[tuple[str, str]]
     ) -> int: ...
 
     async def processing_grant(

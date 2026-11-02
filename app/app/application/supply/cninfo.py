@@ -294,9 +294,13 @@ class CninfoCatalog:
                 if topic in _SEARCH_WORDS:
                     passes.append(("", _SEARCH_WORDS[topic]))
             return passes
-        return [(c, ()) for c in _CATEGORY_TOPIC] + [
-            ("", _SEARCH_WORDS["restructuring"] + _SEARCH_WORDS["supervision"])
+        all_passes: list[tuple[str, tuple[str, ...]]] = [
+            (c, ()) for c in _CATEGORY_TOPIC
         ]
+        all_passes.append(
+            ("", _SEARCH_WORDS["restructuring"] + _SEARCH_WORDS["supervision"])
+        )
+        return all_passes
 
     def _announcement(self, code: str, row: dict, category: str | None) -> Entry | None:
         title, adjunct, announcement_id, disclosed = _row(row)

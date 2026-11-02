@@ -110,7 +110,7 @@ async def test_item_1_3_12_original_delivery_is_isolated_by_zone_and_carries_bas
     assert refs[0].basis == {"confirmation_id": "conf-b", "item_id": "c1"}
 
 
-async def test_item_3_http_knowbase_sends_basis_in_references_and_subscription_basis():
+async def test_public_reference_keeps_demand_ref_without_collected_only_basis():
     from app.domain.supply.models import Demand, DemandItem, Reference, basis_of
 
     captured: list[dict] = []
@@ -161,7 +161,6 @@ async def test_item_3_http_knowbase_sends_basis_in_references_and_subscription_b
         {
             "subject": "alice",
             "ref": "demand:d-sub:s1",
-            "basis": {"subscription_id": "sub-123", "revision": 2},
         }
     ]
 

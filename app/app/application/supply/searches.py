@@ -313,7 +313,16 @@ class SearchService:
                         owner, idempotency_key, {"confirmed": confirmation}
                     )
                     confirmed_saved = True
-                ids = [str(i.get("item_id")) for i in confirmation.get("items") or []]
+                confirmed_items = confirmation.get("items")
+                if not isinstance(confirmed_items, list):
+                    raise SupplyError(
+                        502, "unexpected_response", "knowbase confirmation"
+                    )
+                ids = [
+                    str(i.get("item_id"))
+                    for i in confirmed_items
+                    if isinstance(i, dict)
+                ]
                 if len(ids) != len(chosen):
                     raise SupplyError(
                         502, "unexpected_response", "knowbase confirmation"

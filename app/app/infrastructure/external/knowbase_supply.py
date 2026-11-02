@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from functools import lru_cache
@@ -157,15 +157,14 @@ class HttpKnowbase:
         )
 
     async def add_references(
-        self, material_id: str, version_no: int, references: list[tuple[str, str]]
+        self, material_id: str, version_no: int, references: Sequence[tuple[str, str]]
     ) -> int:
         payload_refs: list[dict[str, object]] = []
         for item in references:
             s, r = item
             ref_dict: dict[str, object] = {"subject": s, "ref": r}
-            basis = getattr(item, "basis", None)
-            if isinstance(basis, dict) and basis:
-                ref_dict["basis"] = basis
+            # 公开引用契约只有 subject/ref；ref 已指向留存的需求依据。
+            # collected 的 beneficiaries 才接受结构化 basis，不能混用。
             payload_refs.append(ref_dict)
         body = await self._call(
             "POST",
@@ -297,7 +296,7 @@ class HttpKnowbase:
             response = await client.request(
                 method,
                 self.base_url.rstrip("/") + path,
-                params=params,
+                params=tuple(params) if isinstance(params, list) else params,
                 json=json_body,
                 content=content,
                 files=files,

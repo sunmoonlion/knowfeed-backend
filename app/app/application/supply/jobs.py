@@ -527,9 +527,9 @@ class JobRunner:
                 receipt.update(materials[0])
             item_readings = set(readings)
             mat_readings = [
-                set(str(r) for r in m["readings"])
+                set(str(r) for r in available)
                 for m in materials
-                if isinstance(m.get("readings"), list)
+                if isinstance(available := m.get("readings"), list)
             ]
             if mat_readings:
                 item_readings = set.intersection(*mat_readings)
@@ -1020,6 +1020,13 @@ class JobRunner:
             reason = ";".join(facts.problems)[:450] or "no statements found"
             await self.knowbase.write_failed(grant, "table", FACTS_VERSION, reason)
             return False
+        if facts.problems:
+            log.warning(
+                "supply_facts_diagnostics material=%s count=%s problems=%s",
+                material_id,
+                len(facts.problems),
+                facts.problems[:50],
+            )
         await self.knowbase.write_facts(grant, FACTS_VERSION, facts.raw, facts.standard)
         return True
 
@@ -1192,10 +1199,10 @@ def _expected_readings(media_type: str, facts: bool) -> set[str]:
     return {"original"}
 
 
-def _url_title(url: str, filename: str | None = None) -> str:
+def _url_title(url: str, filename: object = None) -> str:
     """直接按 URL 取非 HTML 文件时的默认标题（三审第 16 条）：优先取 Content-Disposition
     文件名，否则取 URL 路径末段文件名（去掉查询串）。"""
-    if filename:
+    if isinstance(filename, str):
         cleaned = filename.strip()
         if cleaned:
             return cleaned[:200]

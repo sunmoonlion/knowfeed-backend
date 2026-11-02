@@ -19,9 +19,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import cast
 
 from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.supply.models import REASON_NO_ONE_WAITING
@@ -78,15 +80,16 @@ class SqlScheduleRepository:
                     .order_by(SupplyChannel.priority, SupplyChannel.id)
                 )
             ).scalars()
-            running = dict(
-                (
+            running = {
+                channel_id: count
+                for channel_id, count in (
                     await session.execute(
                         select(SupplyJob.channel_id, func.count())
                         .where(SupplyJob.status == "running")
                         .group_by(SupplyJob.channel_id)
                     )
                 ).all()
-            )
+            }
             fetched = await _fetched_today(session, now)
             queues: list[tuple[str, int]] = []
             for channel in channels:
@@ -196,7 +199,7 @@ class SqlScheduleRepository:
             result = await session.execute(
                 delete(SupplyChannelRequest).where(SupplyChannelRequest.at < before)
             )
-            return int(result.rowcount or 0)
+            return int(cast(CursorResult, result).rowcount or 0)
 
 
 async def _usage(session: AsyncSession, channel_id: str, now: datetime) -> Usage:
@@ -325,8 +328,9 @@ async def _fill(
         job.last_error = REASON_NO_ONE_WAITING
         job.finished_at = now
     everyone = sorted({o for found in owners.values() for o in found})
-    served = dict(
-        (
+    served = {
+        owner: at
+        for owner, at in (
             await session.execute(
                 select(SupplyTurn.owner_subject, SupplyTurn.served_at).where(
                     SupplyTurn.queue == queue,
@@ -334,7 +338,7 @@ async def _fill(
                 )
             )
         ).all()
-    )
+    }
     chosen = pick(
         [
             Candidate(str(j.id), j.tier, j.created_at, tuple(sorted(owners[j.id])))

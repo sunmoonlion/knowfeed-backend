@@ -265,7 +265,7 @@ def basis_of(demand: Demand, item: DemandItem) -> dict[str, object]:
     }
 
 
-class Reference(tuple):
+class Reference(tuple[str, str]):
     """公开原件的引用记录：保留 (subject, ref) 二元组形状，同时挂上该受益人自己的依据。"""
 
     basis: dict[str, object]

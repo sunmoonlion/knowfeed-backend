@@ -6,9 +6,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from datetime import datetime
+from typing import cast
 
 from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -729,7 +731,7 @@ class SqlCatalogRepository:
                 )
                 .values(purged_at=at)
             )
-            return bool(result.rowcount)
+            return bool(cast(CursorResult, result).rowcount)
 
 
 def _job_row(job: SupplyJob, waiting_items: int) -> dict[str, object]:
