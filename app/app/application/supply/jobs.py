@@ -58,8 +58,10 @@ from app.application.supply.processing import (
     wanted_readings,
 )
 from app.application.supply.readings import (
+    PDF_TEXT_VERSION,
     TEXT_VERSION,
     form_of,
+    pdf_text_reading,
     recognize_periodic,
     text_reading,
 )
@@ -668,7 +670,10 @@ class JobRunner:
             earlier = await self.repo.delivered_original(
                 entry.channel_id, entry.channel_doc_id
             )
-            if earlier is not None:
+            if earlier is not None and all(
+                set(item.readings) <= (set(earlier[1].readings) | {"original"})
+                for item, _ in waiting
+            ):
                 original, delivery = earlier
                 references = [
                     Reference(d.owner, i.basis_ref, basis_of(d, i)) for i, d in waiting
@@ -784,7 +789,10 @@ class JobRunner:
                 and earlier_pub[1].readings
             ):
                 recorded = set(earlier_pub[1].readings)
-            if created or recorded is None:
+            done |= recorded or set()
+            requested = {reading for item, _ in waiting for reading in item.readings}
+            missing = requested - done
+            if created or recorded is None or missing:
                 grant = await self.knowbase.processing_grant(
                     material_id, version_no, owner=PUBLIC_OWNER
                 )
@@ -797,11 +805,27 @@ class JobRunner:
                         key if facts else None,
                         title=entry.title,
                         published_on=entry.disclosed_on,
+                        needed=None if created or recorded is None else missing,
                     )
+                    # 默认 PDF 加工保持 pages/table；明确需要正文时才补 text。
+                    if (
+                        (created or recorded is None)
+                        and "text" in requested
+                        and "text" not in done
+                        and form_of(media_type) == "pdf"
+                    ):
+                        done |= await self._process(
+                            grant,
+                            material_id,
+                            content,
+                            media_type,
+                            None,
+                            needed={"text"},
+                            title=entry.title,
+                            published_on=entry.disclosed_on,
+                        )
                 finally:
                     await self._release(grant)
-            else:
-                done |= recorded
             references = [
                 Reference(d.owner, i.basis_ref, basis_of(d, i)) for i, d in waiting
             ]
@@ -1033,6 +1057,29 @@ class JobRunner:
             )
             if pages is not None:
                 done.add("pages")
+            if needed is not None and "text" in needed:
+                try:
+                    text_pages = (
+                        pages
+                        if pages is not None
+                        else await asyncio.to_thread(
+                            pages_reading, content, self.pdf_pages
+                        )
+                    )
+                    body = pdf_text_reading(text_pages)
+                except Exception:
+                    await self.knowbase.write_failed(
+                        grant, "text", PDF_TEXT_VERSION, "no_text_found"
+                    )
+                else:
+                    await self.knowbase.write_text(
+                        grant,
+                        PDF_TEXT_VERSION,
+                        body,
+                        title=title,
+                        published_on=published_on,
+                    )
+                    done.add("text")
             if recognize and facts_key is None and pages is not None:
                 # 上传的 PDF 没有渠道给的描述：从封面认是不是定期报告全文
                 facts_key = recognize_periodic(pages)

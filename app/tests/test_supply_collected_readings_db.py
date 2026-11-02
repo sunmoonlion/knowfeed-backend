@@ -184,3 +184,53 @@ async def test_partial_processing_retry_preserves_success_and_does_not_rewrite_p
     _, got = await w.demands.get("knowbench", third.id)
     assert got[0].status == "ready"
     assert len(w.knowbase.writes) == 2
+
+
+async def test_private_pdf_text_does_not_rewrite_existing_pages(db):
+    w = await world(db, {"alice": {"pages"}})
+    demand, items, _ = await w.submit(readings=("text",))
+    assert await w.runner.run(await job_of(db, items[0].id)) == "done"
+    _, got = await w.demands.get("knowbench", demand.id)
+    assert got[0].status == "ready"
+    assert "text" in got[0].receipt["readings"]
+    assert w.knowbase.writes == []  # already-ready pages were not overwritten
+    assert any(kind == "text" for kind, _ in w.knowbase.calls)
+
+
+async def test_public_pdf_existing_delivery_can_add_a_new_text_reading(db):
+    w = World(db)
+    w.confirm("conf-1", "alice", KEY)
+    _, first, _ = await w.submit()
+    assert await w.runner.run(await job_of(db, first[0].id)) == "done"
+    original_deliver = w.knowbase.deliver_public
+
+    async def same_version(**kw):
+        return {**await original_deliver(**kw), "material_id": "m-1", "created": False}
+
+    w.knowbase.deliver_public = same_version
+    before = len(w.knowbase.calls)
+    w.confirm("conf-text", "alice", KEY)
+    demand, items, _ = await w.submit(
+        confirmation="conf-text", idem="new-text-reading", readings=("text",)
+    )
+    assert await w.runner.run(await job_of(db, items[0].id)) == "done"
+    _, got = await w.demands.get("knowbench", demand.id)
+    assert got[0].status == "ready" and "text" in got[0].receipt["readings"]
+    kinds = [kind for kind, _ in w.knowbase.calls[before:]]
+    assert "text" in kinds and "pages" not in kinds and "facts" not in kinds
+
+
+async def test_scanned_pdf_is_not_reported_as_ready_text(db):
+    w = await world(db, {"alice": {"pages"}})
+
+    class EmptyPages:
+        def text_pages(self, pdf):
+            return [(1, "")]
+
+    w.runner.pdf_pages = EmptyPages()
+    demand, items, _ = await w.submit(readings=("text",))
+    assert await w.runner.run(await job_of(db, items[0].id)) == "done"
+    _, got = await w.demands.get("knowbench", demand.id)
+    assert got[0].status != "ready"
+    assert "text" not in got[0].receipt["readings"]
+    assert ("failed", "text") in w.knowbase.calls

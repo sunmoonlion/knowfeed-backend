@@ -305,7 +305,7 @@ async def test_deadlines_turn_open_items_into_timeouts(db):
 
 
 async def test_review_1_a_redelivered_version_reports_what_was_really_done(db):
-    """knowbase 回 created=False 时，读法以原件记录里记的为准；没有记录就重新加工。"""
+    """knowbase 回 created=False 时，读法以实际成功记录为准；新需求缺的读法补加工，失败不冒充 ready。"""
     w = WebWorld(db)
     _, items = await submit(w, "alice", KEY)
     assert await w.runner.run(await job_of(db, items[0].id)) == "done"
@@ -314,6 +314,13 @@ async def test_review_1_a_redelivered_version_reports_what_was_really_done(db):
         db,
         """UPDATE supply_original_delivery SET readings = '["original", "pages"]'""",
     )
+    working_words = w.runner.pdf_words
+
+    class UnreadableWords:
+        def read_words(self, pdf, *, first_page=1):
+            raise ValueError("synthetic unreadable table")
+
+    w.runner.pdf_words = UnreadableWords()
     grants = sum(1 for c in w.knowbase.calls if c[0] == "grant")
     demand, items = await submit(w, "bob", KEY, n=2)
     w.confirm("conf-bob-tables", "bob", KEY)
@@ -331,12 +338,15 @@ async def test_review_1_a_redelivered_version_reports_what_was_really_done(db):
     _, done = await w.demands.get("knowbench", tables[0].demand_id)
     # 要表的不报「已就绪」：表没做成
     assert (done[0].status, done[0].reason) == ("partial", "readings_incomplete")
-    assert sum(1 for c in w.knowbase.calls if c[0] == "grant") == grants  # 没重做
+    assert (
+        sum(1 for c in w.knowbase.calls if c[0] == "grant") == grants + 1
+    )  # 尝试补加工，但表仍失败
+    w.runner.pdf_words = working_words
     # 原件记录里没记读法：重新领授权加工
     await sql(db, "UPDATE supply_original_delivery SET readings = '[]'")
     _, again = await submit(w, "carol", KEY, n=3)
     assert await w.runner.run(await job_of(db, again[0].id)) == "done"
-    assert sum(1 for c in w.knowbase.calls if c[0] == "grant") == grants + 1
+    assert sum(1 for c in w.knowbase.calls if c[0] == "grant") == grants + 2
 
 
 class AttachingCatalog(FakeCatalog):

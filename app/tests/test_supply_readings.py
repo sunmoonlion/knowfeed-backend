@@ -6,7 +6,12 @@ from datetime import date
 
 import pytest
 
-from app.application.supply.readings import form_of, recognize_periodic, text_reading
+from app.application.supply.readings import (
+    form_of,
+    pdf_text_reading,
+    recognize_periodic,
+    text_reading,
+)
 
 PAGE = """<html><head><title>关于印发某办法的通知_政策</title>
 <meta name="PubDate" content="2026-10-01 10:00"></head>
@@ -78,3 +83,22 @@ def test_the_cover_tells_a_periodic_report():
     assert recognize_periodic(cover("证券代码：600009\n2025年年度报告摘要")) is None
     assert recognize_periodic(cover("2025年年度报告")) is None
     assert recognize_periodic(cover("证券代码：600009\n关于召开股东会的通知")) is None
+
+
+def test_pdf_body_preserves_page_numbers_and_does_not_invent_ocr():
+    body = pdf_text_reading(
+        [{"page": 2, "text": "营业收入 1,234.50"}, {"page": 4, "text": "附注"}]
+    )
+    assert body == "## 第 2 页\n\n营业收入 1,234.50\n\n## 第 4 页\n\n附注"
+    with pytest.raises(ValueError, match="OCR"):
+        pdf_text_reading([{"page": 1, "text": " "}])
+    with pytest.raises(ValueError, match="invalid page"):
+        pdf_text_reading([{"page": True, "text": "x"}])
+
+
+def test_pdf_body_size_is_bounded(monkeypatch):
+    import app.application.supply.readings as readings
+
+    monkeypatch.setattr(readings, "MAX_TEXT_BYTES", 10)
+    with pytest.raises(ValueError, match="too large"):
+        pdf_text_reading([{"page": 1, "text": "超过输出上限"}])

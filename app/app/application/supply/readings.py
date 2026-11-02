@@ -23,6 +23,7 @@ from app.domain.securities.models import InvalidSecurityCode, SecurityCode
 from app.domain.supply.models import DescriptionKey
 
 TEXT_VERSION = "text-1"
+PDF_TEXT_VERSION = "pdf-text-1"
 MAX_TITLE = 500
 MAX_TEXT_BYTES = 20 * 1024 * 1024
 
@@ -84,6 +85,28 @@ def text_reading(
         title=_clip(title) or reading.title,
         published_on=published_on or reading.published_on,
     )
+
+
+def pdf_text_reading(pages: list[dict[str, object]]) -> str:
+    """从 PDF 已抽取的按页文字形成正文，保留页界；不把页图/空页当成 OCR 成功。"""
+    parts: list[str] = []
+    size = 0
+    has_text = False
+    for page in pages:
+        number, content = page.get("page"), page.get("text")
+        if isinstance(number, bool) or not isinstance(number, int) or number < 1:
+            raise ValueError("invalid page number")
+        if not isinstance(content, str):
+            raise ValueError("invalid page text")
+        has_text |= bool(content.strip())
+        part = f"## 第 {number} 页\n\n{content}"
+        size += len(part.encode("utf-8")) + 2
+        if size > MAX_TEXT_BYTES:
+            raise ValueError("too large for a text reading")
+        parts.append(part)
+    if not has_text:
+        raise ValueError("empty PDF text; OCR required")
+    return "\n\n".join(parts)
 
 
 def _from_text(content: bytes, *, markdown: bool) -> TextReading:
