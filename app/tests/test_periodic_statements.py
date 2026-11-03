@@ -113,6 +113,33 @@ def fixture(name: str) -> tuple[dict, list[PageWords]]:
     return body["source"], pages
 
 
+@pytest.mark.parametrize("year", [2023, 2024, 2026])
+def test_maotai_q1_original_words_keep_parent_and_total_equity_distinct(year):
+    source, pages = fixture(f"600519-q1_report-{year}-03-31")
+    facts = statements_from_pages(pages, key_of(source))
+    assert not any(p.startswith("ambiguous:balance_sheet") for p in facts.problems)
+    for end in (f"{year}-03-31", f"{year - 1}-12-31"):
+        rows = {
+            r["code"]: r
+            for r in facts.standard
+            if r["period_end"] == end and r["code"].startswith("BS.")
+        }
+        for code in ("BS.EQUITY_PARENT", "BS.TOTAL_EQUITY"):
+            raw = facts.raw[rows[code]["derived_from"][0]]
+            assert raw["value"] == rows[code]["value"]
+            assert raw["page"] == (7 if year == 2023 else 8)
+            assert raw["label"].endswith("股东权益）合计")
+        # Values are independently extracted, never filled by these equations.
+        assert Decimal(rows["BS.TOTAL_ASSETS"]["value"]) == (
+            Decimal(rows["BS.TOTAL_LIABILITIES"]["value"])
+            + Decimal(rows["BS.TOTAL_EQUITY"]["value"])
+        )
+        assert Decimal(rows["BS.TOTAL_EQUITY"]["value"]) == (
+            Decimal(rows["BS.EQUITY_PARENT"]["value"])
+            + Decimal(rows["BS.MINORITY_EQUITY"]["value"])
+        )
+
+
 def key_of(source: dict) -> DescriptionKey:
     code = source["security_code"]
     return DescriptionKey(

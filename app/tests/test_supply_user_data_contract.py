@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -25,7 +26,12 @@ def validator(model: str) -> Draft202012Validator:
     if not lock_path.exists():
         pytest.skip("parent contract lock is not checked out")
     lock = json.loads(lock_path.read_text())
-    path = PARENT.parent / "knowbase-app" / lock["schema"]
+    # CI may use the release provider artifact while sibling worktrees advance.
+    # The pinned digest is still mandatory for either source.
+    path = Path(
+        os.environ.get("KNOWBASE_USER_DATA_CONTRACT_PATH")
+        or (PARENT.parent / "knowbase-app" / lock["schema"])
+    )
     if not path.exists():
         pytest.skip("knowbase provider contract is not checked out")
     assert hashlib.sha256(path.read_bytes()).hexdigest() == lock["sha256"]
@@ -224,6 +230,84 @@ def test_numeric_line_uses_uniquely_matched_adjacent_source_label():
     for standard in facts.standard:
         raw = facts.raw[standard["derived_from"][0]]
         assert raw["row_no"] == 2 and raw["page"] == 4
+    validator("FactsIn").validate(
+        {
+            "processor_version": FACTS_VERSION,
+            "raw": facts.raw,
+            "standard": facts.standard,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("year", "page", "parent", "minority", "equity"),
+    [
+        (
+            2023,
+            7,
+            ("218275691302.62", "197506672396.00"),
+            ("8187882900.01", "7458015858.08"),
+            ("226463574202.63", "204964688254.08"),
+        ),
+        (
+            2024,
+            8,
+            ("239731785910.55", "215668571607.43"),
+            ("8804982639.98", "7987897687.39"),
+            ("248536768550.53", "223656469294.82"),
+        ),
+        (
+            2026,
+            8,
+            ("270894035676.27", "244637811032.18"),
+            ("10241850759.42", "9321442876.89"),
+            ("281135886435.69", "253959253909.07"),
+        ),
+    ],
+)
+def test_q1_wrapped_parent_equity_does_not_consume_total_equity(
+    year, page, parent, minority, equity
+):
+    """Replay the printed rows from the three affected reports, not inferred totals."""
+    rows = (
+        ExtractedRow(page, "归属于母公司所有者权益（或", None, None),
+        ExtractedRow(page, "", *map(Decimal, parent)),
+        ExtractedRow(page, "股东权益）合计", None, None),
+        ExtractedRow(page, "少数股东权益", *map(Decimal, minority)),
+        ExtractedRow(page, "所有者权益（或股东权益）", None, None),
+        ExtractedRow(page, "", *map(Decimal, equity)),
+        ExtractedRow(page, "合计", None, None),
+    )
+    statement = ExtractedStatement(
+        "balance_sheet", page, "元", "statement_page", False, rows, {}
+    )
+    facts = StatementFacts()
+    _one(
+        facts,
+        "balance_sheet",
+        statement,
+        date(year, 3, 31),
+        date(year - 1, 12, 31),
+        "instant",
+    )
+    assert not facts.problems
+    assert len(facts.standard) == 6
+    for code, values, label, row_no in (
+        ("BS.EQUITY_PARENT", parent, "归属于母公司所有者权益（或股东权益）合计", 2),
+        ("BS.MINORITY_EQUITY", minority, "少数股东权益", 4),
+        ("BS.TOTAL_EQUITY", equity, "所有者权益（或股东权益）合计", 6),
+    ):
+        found = [r for r in facts.standard if r["code"] == code]
+        assert [r["value"] for r in found] == list(values)
+        assert [r["period_end"] for r in found] == [
+            f"{year}-03-31",
+            f"{year - 1}-12-31",
+        ]
+        for r in found:
+            raw = facts.raw[r["derived_from"][0]]
+            assert raw["label"] == label
+            assert raw["page"] == page and raw["row_no"] == row_no
+            assert raw["value"] == r["value"]
     validator("FactsIn").validate(
         {
             "processor_version": FACTS_VERSION,

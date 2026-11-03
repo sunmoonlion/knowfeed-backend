@@ -33,3 +33,13 @@ knowbase 提供方新增兼容 readings/renditions 响应字段及版本引用�
 定向 26 passed；包含调度/网页/重复交付/撤权的扩展回归 62 passed，无跳过，42.57s；
 ruff/pyright 通过。旧回归期望“不重做缺表”的断言改为实测补加工失败仍 partial，
 成功后才 ready。日志 /tmp/luna-supply-feed-regression.log。无线上作业重放/DB 写入。
+
+## 2026-11-04 一季报权益跨行误识别修复
+
+基线 df981b2，分支 fix/statement-label-continuations。现场 733b21b5、73081dc1 的查询均缺 2023/2024/2026 一季报权益；只读取得三份已入库原件并核 SHA-256，用旧/新解析器离线回放。旧解析器将“归属于母公司所有者权益（或 / 数字 / 股东权益）合计”的后半截先匹配成 total_equity；与真正总权益重复而同时丢弃。修复优先完整三行名称，再尝试相邻片段，保留重复科目拒绝和旧版式规则。三份报告各恢复归母权益/总权益本期与比较期4值，共12值；来自原件，不反推、不换公式，raw 行号/页码/标准层 derived_from 可追溯。
+
+加工版本升 periodic-statements-3，规则版本同步。只加读法版本，不覆盖旧内容/读法或既有委托结果。补了三份原始PDF裁出的词/坐标夹具与逐数、逐页、两式独立校验；合成行测试覆盖同一歧义。旧版回放三份均0条相关标准值，新版均4条。原件还存在其他空标签诊断，未把全部抽取宣称完美。
+
+验证：250 passed（抽取、历史版式、跨年、供给契约、季报、readings、HTTP client）；Ruff/Pyright无错。最初12项契约测试因相邻knowbase开发树schema比发布钉版新而失败，保留事实。测试新增 KNOWBASE_USER_DATA_CONTRACT_PATH 支持钉版artifact，仍强制校验消费者锁SHA；最终用qwen发布工位原契约7fcba39f…复跑全过，不升级生产契约。
+
+发布父仓从实际发布 b9464a9 起；不回退已发布前端/admin。需要Qwen发版后以knowfeed正式processing_grant/content/write_facts/release接口补加工三份公共原件，并核新读法。仅部署不会自动修旧表；旧委托钉版不能被偷偷替换。未重开付费任务、未写生产DB。后续：补加工后核 list_inputs/query_facts 新读法，再按原作者方法验证真实计算。

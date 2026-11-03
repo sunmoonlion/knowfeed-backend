@@ -35,8 +35,8 @@ from app.domain.securities.report_statements import (
 from app.domain.supply.models import DescriptionKey
 
 PAGES_VERSION = "pages-pdfplumber-1"
-FACTS_VERSION = "periodic-statements-2"
-RULE = "knowfeed-periodic-statements-1:catalog-label"
+FACTS_VERSION = "periodic-statements-3"
+RULE = "knowfeed-periodic-statements-3:catalog-label"
 
 # 旧目录的字段 → knowbase 科目表（第 1 版）的编码；锁测试核这些编码在 knowbase 的科目表里
 FIELD_TO_CODE: dict[str, str] = {

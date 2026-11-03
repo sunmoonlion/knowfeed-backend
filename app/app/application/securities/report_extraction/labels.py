@@ -109,12 +109,14 @@ def resolve(statement: str, rows: Sequence[ExtractedRow]) -> Resolution:
         before, after = text_at(i - 1), text_at(i + 1)
         own = strip_note(row.label)
         options: list[tuple[str, tuple[int, ...]]] = []
+        # 三行科目必须先看完整名称。否则「归属于母公司所有者权益（或 / 数字 /
+        # 股东权益）合计」会先被后半段认成总权益；与真正总权益重复后两行均被丢弃。
+        if before and after:
+            options.append((before + own + after, (i - 1, i + 1)))
         if before:
             options.append((before + own, (i - 1,)))
         if after:
             options.append((own + after, (i + 1,)))
-        if before and after:
-            options.append((before + own + after, (i - 1, i + 1)))
         options.append((own, ()))
         exact = names.get(normalize(own)) if own else None
         name, taken = None, ()
