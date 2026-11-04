@@ -43,3 +43,8 @@ ruff/pyright 通过。旧回归期望“不重做缺表”的断言改为实测�
 验证：250 passed（抽取、历史版式、跨年、供给契约、季报、readings、HTTP client）；Ruff/Pyright无错。最初12项契约测试因相邻knowbase开发树schema比发布钉版新而失败，保留事实。测试新增 KNOWBASE_USER_DATA_CONTRACT_PATH 支持钉版artifact，仍强制校验消费者锁SHA；最终用qwen发布工位原契约7fcba39f…复跑全过，不升级生产契约。
 
 发布父仓从实际发布 b9464a9 起；不回退已发布前端/admin。需要Qwen发版后以knowfeed正式processing_grant/content/write_facts/release接口补加工三份公共原件，并核新读法。仅部署不会自动修旧表；旧委托钉版不能被偷偷替换。未重开付费任务、未写生产DB。后续：补加工后核 list_inputs/query_facts 新读法，再按原作者方法验证真实计算。
+
+
+## 2026-11-04 Wind 管理端HTTP接通
+
+修复正式入口两处断点：Wind注册使用collected私有区；试采HTTP传入source_query且允许无主体供应商查询。共享目录服务拒绝错渠道、错资料类型、期间伪装及非供应商渠道查询；参数沿用query_json校验。真实HTTP→排队→worker→审核数据库回归（模拟供应商）和既有Wind/供给测试48 passed；ruff、pyright通过。没有修改线上渠道记录或伪造试采/批准。

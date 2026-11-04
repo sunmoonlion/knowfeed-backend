@@ -16,7 +16,7 @@ from datetime import date, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.application.errors.exceptions import AppException
 from app.application.supply.catalog import PLUGINS, ChannelCatalog
@@ -31,7 +31,7 @@ from app.domain.supply.catalog import (
     Registration,
     Trial,
 )
-from app.domain.supply.models import Channel, DescriptionKey, SupplyError
+from app.domain.supply.models import Channel, DescriptionKey, SupplyError, query_json
 from app.infrastructure.storage.postgres import get_postgres
 from app.interfaces.http.middleware.auth import require_knowfeed_admin
 
@@ -213,6 +213,7 @@ class RegistrationIn(BaseModel):
             name=self.name,
             kind=self.kind,
             plugin=self.plugin,
+            zone="collected" if self.plugin == "wind-mcp" else "disclosure",
             doc_types=tuple(self.doc_types),
             readings=tuple(self.readings),
             license=self.license,
@@ -270,6 +271,16 @@ class TrialIn(BaseModel):
     period_end: date | None = None
     url: str | None = Field(default=None, max_length=2000)
     topic: str | None = Field(default=None, max_length=200)
+    source_query: dict[str, object] | None = None
+
+    @field_validator("source_query")
+    @classmethod
+    def valid_query(cls, value):
+        try:
+            query_json(value)
+        except SupplyError as exc:
+            raise ValueError(exc.message) from None
+        return value
 
 
 # —— 来源目录 ——
@@ -395,9 +406,13 @@ async def request_trial(
 ):
     key = (
         DescriptionKey(
-            payload.subject, payload.doc_type, payload.period_start, payload.period_end
+            payload.subject,
+            payload.doc_type,
+            payload.period_start,
+            payload.period_end,
+            source_query=query_json(payload.source_query),
         )
-        if payload.subject and payload.doc_type
+        if payload.doc_type and (payload.subject or payload.source_query)
         else None
     )
     trial = await _call(

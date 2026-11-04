@@ -148,3 +148,68 @@ async def test_operators_register_trial_review_and_watch(db):
     assert gaps.status_code == 200 and gaps.json()["items"] == []
     bad = await http.get("/api/admin/v1/supply/gaps", params={"kind": "nope"})
     assert bad.status_code == 422
+
+
+async def test_wind_query_trial_uses_admin_http_worker_and_review(db):
+    from test_provider_query_db import Provider
+
+    from app.application.supply.provider_query import ProviderCatalog
+
+    w = World(db)
+    desk = Desk(db, w)
+    http = client(desk)
+    response = await http.post(
+        "/api/admin/v1/supply/channels",
+        json={
+            "channel_id": "wind",
+            "name": "Wind test",
+            "kind": "catalog",
+            "plugin": "wind-mcp",
+            "doc_types": ["other_text"],
+            "readings": ["original", "text"],
+            "license": "self",
+            "rate_per_minute": 10,
+            "daily_cap": 0,
+            "config": {"owner_subject": "alice"},
+        },
+    )
+    assert response.status_code == 201, response.text
+    channel = await desk.catalog.get("wind")
+    provider = Provider()
+    desk.catalogs["wind-mcp"] = ProviderCatalog(provider, channel, w.repo, trial=True)
+    query = {
+        "channel": "wind",
+        "service": "financial_docs",
+        "tool": "get_company_announcements",
+        "arguments": {"query": "synthetic"},
+    }
+    endpoint = "/api/admin/v1/supply/channels/wind/trials"
+    for body in (
+        {"subject": "600519.SH", "doc_type": "other_text"},
+        {"doc_type": "annual_report", "source_query": query},
+        {"doc_type": "other_text", "source_query": {**query, "channel": "cninfo"}},
+        {"doc_type": "other_text", "source_query": {**query, "arguments": "bad"}},
+    ):
+        rejected = await http.post(endpoint, json=body)
+        assert rejected.status_code == 422, rejected.text
+    assert not provider.calls
+    trial = await http.post(
+        endpoint, json={"doc_type": "other_text", "source_query": query}
+    )
+    assert trial.status_code == 202, trial.text
+    assert trial.json()["key"]["source_query"] == query
+    assert trial.json()["requested_by"] == "casdoor/op-1"
+    assert not provider.calls
+    assert await desk.trials.run(trial.json()["trial_id"]) == "ok"
+    assert len(provider.calls) == 1
+    approved = await http.post(
+        "/api/admin/v1/supply/channels/wind/review",
+        json={"decision": "approve", "reason": "synthetic authorized account"},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["review"] == "approved"
+    rejected = await http.post(
+        "/api/admin/v1/supply/channels/cninfo/trials",
+        json={"doc_type": "other_text", "source_query": query},
+    )
+    assert rejected.status_code == 422

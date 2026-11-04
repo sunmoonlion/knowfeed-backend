@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import uuid
 from collections.abc import Callable
@@ -50,6 +51,7 @@ from app.domain.supply.models import (
     DescriptionKey,
     SupplyError,
     check_subject,
+    query_json,
     refused,
 )
 from app.domain.supply.schedule import ChannelDeferred, Conditions
@@ -406,6 +408,20 @@ class ChannelCatalog:
         channel = await self.get(channel_id)
         if channel.status == "disabled":
             raise SupplyError(409, "channel_disabled", "enable the channel first")
+        if channel.plugin == "wind-mcp":
+            if key is None or not key.source_query:
+                raise refused("trial_sample_invalid", "give a supplier query")
+            query = json.loads(key.source_query)
+            query_json(query)
+            if (
+                query["channel"] != channel.id
+                or key.doc_type != "other_text"
+                or key.period_start
+                or key.period_end
+            ):
+                raise refused("trial_sample_invalid", "query does not match channel")
+        elif key and key.source_query:
+            raise refused("trial_sample_invalid", "channel does not accept queries")
         sample: dict[str, object]
         if channel.kind == "catalog":
             if key is None:
