@@ -213,7 +213,7 @@ class RegistrationIn(BaseModel):
             name=self.name,
             kind=self.kind,
             plugin=self.plugin,
-            zone="collected" if self.plugin == "wind-mcp" else "disclosure",
+            zone="collected" if self.plugin == "wind-mcp" else None,
             doc_types=tuple(self.doc_types),
             readings=tuple(self.readings),
             license=self.license,

@@ -78,6 +78,7 @@ async def test_operators_register_trial_review_and_watch(db):
     made = await http.post("/api/admin/v1/supply/channels", json=body)
     assert made.status_code == 201, made.text
     assert made.json()["review"] == "pending"
+    assert made.json()["zone"] == "collected"
     again = await http.post("/api/admin/v1/supply/channels", json=body)
     assert (again.status_code, again.json()["code"]) == (409, "channel_exists")
 
