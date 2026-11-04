@@ -306,3 +306,110 @@ async def test_lost_paid_response_is_not_automatically_replayed_after_worker_rec
     assert (await w.demands.get("knowbench", demand.id))[1][
         0
     ].reason == "provider_outcome_unknown"
+
+
+async def test_shared_wind_discovery_and_confirmed_private_delivery(db):
+    from app.application.supply.provider_query import SourceDiscovery
+
+    w, provider = await setup(db)
+    await sql(
+        db,
+        "UPDATE supply_channel SET config=config || '{\"audience\":\"all_users\"}'::jsonb WHERE id='cninfo'",
+    )
+    channel = await w.repo.get_channel("cninfo")
+    w.catalogs["wind-mcp"] = ProviderCatalog(provider, channel, w.repo)
+    discovery = SourceDiscovery(
+        w.repo, lambda c: w.catalogs.get(c.plugin), ["financial_docs"]
+    )
+    for owner in ("alice", "bob"):
+        assert (await discovery.discover(owner))["sources"]
+    assert not (await discovery.discover(""))["sources"]
+    assert not provider.calls
+    w.confirm("conf-a", "alice", key())
+    w.confirm("conf-b", "bob", key())
+    da, ia, _ = await w.submit(
+        owner="alice",
+        confirmation="conf-a",
+        key=key(),
+        readings=("original", "text"),
+        idem="shared-query-alice",
+    )
+    dbob, ib, _ = await w.submit(
+        owner="bob",
+        confirmation="conf-b",
+        key=key(),
+        readings=("original", "text"),
+        idem="shared-query-bob",
+    )
+    assert await job_of(db, ia[0].id) == await job_of(db, ib[0].id)
+    assert await w.runner.run(await job_of(db, ia[0].id)) == "done"
+    assert len(provider.calls) == 1
+    for demand in (da, dbob):
+        item = (await w.demands.get("knowbench", demand.id))[1][0]
+        assert item.status == "ready"
+    assert all(d["license"] == "self" for d in w.knowbase.delivered)
+    # Only the two explicitly confirmed beneficiaries get private copies.
+    owners = await sql(
+        db,
+        "SELECT count(DISTINCT owner_subject) FROM supply_original_delivery WHERE zone='collected'",
+    )
+    assert owners == 2
+
+
+async def test_shared_wind_revocation_before_delivery_rechecks_owner(db):
+    w, provider = await setup(db)
+    await sql(
+        db,
+        "UPDATE supply_channel SET config=config || '{\"audience\":\"all_users\"}'::jsonb WHERE id='cninfo'",
+    )
+    channel = await w.repo.get_channel("cninfo")
+    adapter = ProviderCatalog(provider, channel, w.repo)
+    w.catalogs["wind-mcp"] = adapter
+    w.confirm("conf-b", "bob", key())
+    demand, items, _ = await w.submit(
+        owner="bob", confirmation="conf-b", key=key(), readings=("original",)
+    )
+    fetch = adapter.fetch
+
+    async def fetch_and_restrict(entry):
+        response = await fetch(entry)
+        await sql(
+            db, "UPDATE supply_channel SET config=config - 'audience' WHERE id='cninfo'"
+        )
+        return response
+
+    adapter.fetch = fetch_and_restrict
+    await w.runner.run(await job_of(db, items[0].id))
+    assert (await w.demands.get("knowbench", demand.id))[1][
+        0
+    ].reason == "provider_owner_forbidden"
+    assert not w.knowbase.delivered
+
+
+async def test_shared_account_quota_pause_applies_to_every_user(db):
+    w, provider = await setup(
+        db, SupplyError(402, "provider_quota_exhausted", "synthetic")
+    )
+    await sql(
+        db,
+        "UPDATE supply_channel SET config=config || '{\"audience\":\"all_users\"}'::jsonb WHERE id='cninfo'",
+    )
+    channel = await w.repo.get_channel("cninfo")
+    w.catalogs["wind-mcp"] = ProviderCatalog(provider, channel, w.repo)
+    w.confirm("conf-b", "bob", key())
+    _, items, _ = await w.submit(
+        owner="bob", confirmation="conf-b", key=key(), readings=("original",)
+    )
+    assert await w.runner.run(await job_of(db, items[0].id)) == "failed"
+    assert (await w.repo.get_channel("cninfo")).status == "paused"
+    w.confirm("conf-a", "alice", key("another"))
+    _, items, _ = await w.submit(
+        owner="alice",
+        confirmation="conf-a",
+        key=key("another"),
+        readings=("original",),
+        idem="shared-after-quota",
+    )
+    assert await w.runner.run(await job_of(db, items[0].id)) == "held"
+    assert len(provider.calls) == 1
+    assert not w.knowbase.delivered

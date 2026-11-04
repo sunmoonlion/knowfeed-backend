@@ -420,6 +420,19 @@ class Channel:
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
+    def allows_owner(self, owner: str) -> bool:
+        """Shared credentials do not make private collected materials public."""
+        if self.plugin != "wind-mcp":
+            return (
+                not self.config.get("owner_subject")
+                or self.config["owner_subject"] == owner
+            )
+        audience = self.config.get("audience", "owner")
+        return bool(owner and self.config.get("owner_subject")) and (
+            audience == "all_users"
+            or (audience == "owner" and self.config["owner_subject"] == owner)
+        )
+
     def covers(self, key: DescriptionKey) -> bool:
         """渠道能供这一条：审过、没停用，大类看它下面有没有这个渠道登记的细类。
 

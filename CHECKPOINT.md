@@ -48,3 +48,8 @@ ruff/pyright 通过。旧回归期望“不重做缺表”的断言改为实测�
 ## 2026-11-04 Wind 管理端HTTP接通
 
 修复正式入口两处断点：Wind注册使用collected私有区；试采HTTP传入source_query且允许无主体供应商查询。共享目录服务拒绝错渠道、错资料类型、期间伪装及非供应商渠道查询；参数沿用query_json校验。真实HTTP→排队→worker→审核数据库回归（模拟供应商）和既有Wind/供给测试48 passed；ruff、pyright通过。没有修改线上渠道记录或伪造试采/批准。
+
+
+## 2026-11-04 所有者追加：向全部登录账号开放Wind
+
+渠道config新增显式audience=owner/all_users（旧配置默认owner），凭据owner_subject仍绑定服务端账号，不能用通配身份替代。发现与取数/交付共用Channel.allows_owner；交付前重新读取渠道范围，收窄后不继续给越界账号交付。collected/self、每人确认、每人独立副本不变。全平台共享串行限流和额度耗尽暂停。64项定向数据库/适配器测试通过，含双用户共享取数但私有交付、查询中收窄拒交付、额度耗尽阻止其他账号后续查询；ruff/pyright通过。

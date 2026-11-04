@@ -70,6 +70,8 @@ class ProviderCatalog:
             not in (("approved", "pending") if self.trial else ("approved",))
             or current.zone != "collected"
             or current.license != "self"
+            or current.config.get("audience", "owner")
+            != self.channel.config.get("audience", "owner")
             or current.config.get("owner_subject")
             != self.channel.config.get("owner_subject")
         ):
@@ -145,7 +147,7 @@ class SourceDiscovery:
                 channel.plugin != "wind-mcp"
                 or channel.review != "approved"
                 or channel.status != "active"
-                or channel.config.get("owner_subject") != owner
+                or not channel.allows_owner(owner)
             ):
                 continue
             adapter = self.plugins(channel)

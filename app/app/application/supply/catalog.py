@@ -640,6 +640,8 @@ def _check_plugin(reg: Registration) -> None:
                 "provider_scope_invalid",
                 "Wind queries require private collected response evidence and serial execution",
             )
+        if reg.config.get("audience", "owner") not in ("owner", "all_users"):
+            raise refused("provider_scope_invalid", "unknown Wind audience")
         if (
             not isinstance(reg.config.get("owner_subject"), str)
             or not reg.config["owner_subject"]

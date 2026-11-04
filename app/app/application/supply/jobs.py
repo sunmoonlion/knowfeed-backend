@@ -479,15 +479,25 @@ class JobRunner:
     async def _provider_waiting(
         self, channel: Channel, waiting: list[tuple[DemandItem, Demand]]
     ) -> list[tuple[DemandItem, Demand]]:
-        owner = channel.config.get("owner_subject")
-        if not owner:
-            return waiting
-        forbidden = [i.id for i, d in waiting if d.owner != owner]
+        if channel.plugin == "wind-mcp":
+            current = await self.repo.get_channel(channel.id)
+            if (
+                current is None
+                or current.review != "approved"
+                or current.status != "active"
+            ):
+                raise SupplyError(
+                    409,
+                    "provider_suspended",
+                    "supplier channel is suspended or changed",
+                )
+            channel = current
+        forbidden = [i.id for i, d in waiting if not channel.allows_owner(d.owner)]
         if forbidden:
             await self.repo.settle_items(
                 forbidden, "failed", self.now(), reason="provider_owner_forbidden"
             )
-        return [(i, d) for i, d in waiting if d.owner == owner]
+        return [(i, d) for i, d in waiting if channel.allows_owner(d.owner)]
 
     async def _fetch_and_deliver(self, job: Job, channel: Channel) -> str:
         if not await self._provider_waiting(

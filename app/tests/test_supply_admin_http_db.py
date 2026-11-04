@@ -184,6 +184,22 @@ async def test_wind_query_trial_uses_admin_http_worker_and_review(db):
         "tool": "get_company_announcements",
         "arguments": {"query": "synthetic"},
     }
+    bad_registration = await http.post(
+        "/api/admin/v1/supply/channels",
+        json={
+            "channel_id": "bad-wind",
+            "name": "bad",
+            "kind": "catalog",
+            "plugin": "wind-mcp",
+            "doc_types": ["other_text"],
+            "readings": ["text"],
+            "license": "self",
+            "rate_per_minute": 10,
+            "daily_cap": 0,
+            "config": {"owner_subject": "alice", "audience": "unknown"},
+        },
+    )
+    assert bad_registration.status_code == 422
     endpoint = "/api/admin/v1/supply/channels/wind/trials"
     for body in (
         {"subject": "600519.SH", "doc_type": "other_text"},
