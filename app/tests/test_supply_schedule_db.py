@@ -744,3 +744,28 @@ async def test_unlimited_daily_cap_keeps_rate_limits_and_counts_real_requests(db
             is not None
         )
         w.clock.now += timedelta(minutes=2)
+
+
+async def test_dispatch_treats_zero_daily_cap_as_unlimited(db):
+    # 账 184：daily_cap=0 是「不限份数」（domain/supply/schedule.py），派发不能当成用完
+    w = World(db)
+    await sql(db, "UPDATE supply_channel SET daily_cap = 0 WHERE id = 'cninfo'")
+    w.confirm("conf-a", "alice", KEY)
+    await w.submit(owner="alice", confirmation="conf-a")
+    job_id = str(await sql(db, "SELECT id FROM supply_job"))
+    assert await w.dispatch() == [job_id]
+
+
+async def test_dispatch_still_skips_a_used_up_positive_daily_cap(db):
+    w = World(db)
+    await sql(db, "UPDATE supply_channel SET daily_cap = 1 WHERE id = 'cninfo'")
+    # 今天已经取过一份（限速器每取一份记一行）
+    await sql(
+        db,
+        "INSERT INTO supply_channel_request (channel_id, kind, at) "
+        "VALUES ('cninfo', 'fetch', :at)",
+        at=w.clock.now,
+    )
+    w.confirm("conf-a", "alice", KEY)
+    await w.submit(owner="alice", confirmation="conf-a")
+    assert await w.dispatch() == []

@@ -200,6 +200,13 @@ class Usage:
     global_oldest: datetime | None = None
 
 
+def daily_cap_reached(daily_cap: int, fetched_today: int) -> bool:
+    """今天这条渠道的份数用完了没有。`daily_cap=0` 是不限份数（管理端允许 0，Wind 渠道就是 0）。
+
+    派发（仓库层）与限速（`wait_for`）都用这一个判断，不各写一遍（账 184）。"""
+    return daily_cap > 0 and fetched_today >= daily_cap
+
+
 def wait_for(
     usage: Usage,
     *,
@@ -210,7 +217,7 @@ def wait_for(
     now: datetime,
 ) -> datetime | None:
     """这次能不能问：能就回 None；不能就回最早什么时候能问。"""
-    if fetch and daily_cap > 0 and usage.fetched_today >= daily_cap:
+    if fetch and daily_cap_reached(daily_cap, usage.fetched_today):
         return next_day(now)
     waits = []
     if usage.channel_minute >= rate_per_minute:

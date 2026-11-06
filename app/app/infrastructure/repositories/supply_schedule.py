@@ -34,6 +34,7 @@ from app.domain.supply.schedule import (
     TIER_BACKGROUND,
     Candidate,
     Usage,
+    daily_cap_reached,
     day_start,
     pick,
     wait_for,
@@ -93,7 +94,7 @@ class SqlScheduleRepository:
             fetched = await _fetched_today(session, now)
             queues: list[tuple[str, int]] = []
             for channel in channels:
-                if fetched.get(channel.id, 0) >= channel.daily_cap:
+                if daily_cap_reached(channel.daily_cap, fetched.get(channel.id, 0)):
                     continue  # 今天的份数用完了：排出去也只会放回来，明天再排
                 queues.append(
                     (channel.id, channel.max_running - running.get(channel.id, 0))
