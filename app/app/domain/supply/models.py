@@ -172,10 +172,35 @@ def query_json(value: object) -> str | None:
 
 
 @dataclass(frozen=True)
+class FactsSpec:
+    """「要哪些数」的那一半（SDD 0051，所有者 2026-11-07）：哪几个科目、什么口径。
+
+    需求只说要什么；knowfeed 决定找哪个渠道、怎么取。字典形状同 knowbase 的 FactKey，
+    逐字一样才对得上用户的确认。"""
+
+    codes: tuple[str, ...]
+    consolidation: str = "consolidated"
+    duration: str = "year"
+    disclosure: str = "first"
+
+
+# 一期的数落在哪份定期报告里（期末月日 → 细类）；报告期一律从年初起算（同 knowbase）
+_REPORT_OF_END = {
+    (3, 31): "q1_report",
+    (6, 30): "semiannual_report",
+    (9, 30): "q3_report",
+    (12, 31): "annual_report",
+}
+
+
+@dataclass(frozen=True)
 class DescriptionKey:
     """一条描述（词表同 knowbase，SDD 0049）：主体 × 类型 × 期间 × 版本形态，外加缩小
     范围的事项、行业。类型可以是细类或大类；定期报告的期间是报告期（一条对一份），
-    其余类型的期间是披露时间窗（一条对窗里的一批）。缺省值不写进字典。"""
+    其余类型的期间是披露时间窗（一条对窗里的一批）。缺省值不写进字典。
+
+    「要哪些数」的（`facts` 不空）：类型、期间是 knowfeed 自己推的「这一期的数落在哪份
+    定期报告里」，只给渠道匹配用；写出去的字典仍是用户确认的那条（`kind: facts`）。"""
 
     subject: str | None
     doc_type: str
@@ -185,8 +210,20 @@ class DescriptionKey:
     topics: tuple[str, ...] = ()
     industry: str | None = None
     source_query: str | None = None
+    facts: FactsSpec | None = None
 
     def as_dict(self) -> dict[str, object]:
+        if self.facts is not None:
+            assert self.period_end is not None
+            return {
+                "kind": "facts",
+                "subject": self.subject,
+                "period_end": self.period_end.isoformat(),
+                "codes": list(self.facts.codes),
+                "consolidation": self.facts.consolidation,
+                "duration": self.facts.duration,
+                "disclosure": self.facts.disclosure,
+            }
         out: dict[str, object] = {
             "subject": self.subject,
             "doc_type": self.doc_type,
@@ -207,6 +244,8 @@ class DescriptionKey:
 
     @staticmethod
     def from_dict(data: dict[str, object]) -> DescriptionKey:
+        if data.get("kind") == "facts":
+            return facts_key(data)
         start, end = data.get("period_start"), data.get("period_end")
         topics = data.get("topics") or ()
         return DescriptionKey(
@@ -230,7 +269,41 @@ class DescriptionKey:
             f"{self.subject}|{self.doc_type}|{self.period_start}|{self.period_end}"
             + extra
             + ("|query:" + self.source_query if self.source_query else "")
+            + (
+                f"|facts:{','.join(self.facts.codes)}|{self.facts.consolidation}"
+                f"|{self.facts.duration}|{self.facts.disclosure}"
+                if self.facts
+                else ""
+            )
         )
+
+
+def facts_key(data: dict[str, object]) -> DescriptionKey:
+    """「要哪些数」的一条读进来：照原样留住（写回去逐字一样），另推出这一期的数落在哪份
+    定期报告里给渠道匹配。期末日不是季末、半年末、年末的不收。"""
+    end = date.fromisoformat(str(data["period_end"]))
+    doc_type = _REPORT_OF_END.get((end.month, end.day))
+    codes = data.get("codes")
+    if (
+        doc_type is None
+        or not isinstance(codes, list)
+        or not codes
+        or not all(isinstance(c, str) for c in codes)
+        or not data.get("subject")
+    ):
+        raise ValueError("a facts key needs a subject, chart codes and a period end")
+    return DescriptionKey(
+        subject=str(data["subject"]),
+        doc_type=doc_type,
+        period_start=date(end.year, 1, 1),
+        period_end=end,
+        facts=FactsSpec(
+            codes=tuple(codes),
+            consolidation=str(data.get("consolidation") or "consolidated"),
+            duration=str(data.get("duration") or "year"),
+            disclosure=str(data.get("disclosure") or "first"),
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -359,6 +432,11 @@ def check_demand(
                     )
             else:
                 check_subject(item.key.subject or "", item.key.doc_type)
+            if item.key.facts is not None and "table" not in item.readings:
+                # 数在表格读法的事实行里（SDD 0051）：要数却不要表格读法，取回来也查不到
+                raise refused(
+                    "readings_invalid", "a facts item needs the table reading"
+                )
         elif not item.url or len(item.url) > MAX_URL:
             raise refused("url_invalid", f"a URL of at most {MAX_URL} characters")
         if not item.readings or any(r not in READINGS for r in item.readings):
@@ -443,7 +521,18 @@ class Channel:
             if query["channel"] != self.id or self.plugin != "wind-mcp":
                 return False
         elif self.plugin == "wind-mcp":
-            return False
+            # 「要哪些数」：Wind 只认它配置里有对照的科目（SDD 0051 第 2.3 节；对照随 W0 核实的
+            # 字段在管理端逐条加，没有就不认、落到下一个渠道）。要资料的 Wind 一律不认
+            if key.facts is None:
+                return False
+            fields = self.config.get("fact_fields")
+            if not isinstance(fields, dict) or not all(
+                c in fields for c in key.facts.codes
+            ):
+                return False
+            return self.status in ("active", "paused") and (
+                self.review == "approved" or self.status_reason == "re_review"
+            )
         markets = self.config.get("markets")
         if isinstance(markets, list) and markets:
             if (key.subject or "").rsplit(".", 1)[-1] not in markets:

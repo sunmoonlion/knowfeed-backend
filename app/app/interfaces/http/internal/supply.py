@@ -100,6 +100,20 @@ class DescriptionKeyIn(BaseModel):
     source_query: dict[str, object] | None = None
 
 
+class FactKeyIn(BaseModel):
+    """要哪些数的一条（knowbase 的 FactKey，SDD 0051）：只说要什么，渠道与取法由 knowfeed 定。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["facts"]
+    subject: str = Field(min_length=1, max_length=64)
+    period_end: date
+    codes: list[str] = Field(min_length=1, max_length=30)
+    consolidation: Literal["consolidated", "parent"] = "consolidated"
+    duration: Literal["year", "half", "quarter", "ytd", "instant"] = "year"
+    disclosure: Literal["first", "latest"] = "first"
+
+
 class PrefillIn(BaseModel):
     """给网址时预填的描述（选填）。"""
 
@@ -116,7 +130,7 @@ class DemandItemModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     confirmation_item: str = Field(min_length=1, max_length=16)
-    key: DescriptionKeyIn | None = None
+    key: DescriptionKeyIn | FactKeyIn | None = None
     url: str | None = Field(default=None, max_length=2000)
     follow_links: bool = False
     prefill: PrefillIn | None = None
@@ -208,6 +222,18 @@ async def _call(work):
 
 
 def item_in(i: DemandItemModel) -> DemandItemIn:
+    if isinstance(i.key, FactKeyIn):
+        try:
+            facts = DescriptionKey.from_dict(i.key.model_dump(mode="json"))
+        except ValueError as exc:
+            raise AppException(
+                code="key_invalid", status_code=422, msg=str(exc)
+            ) from None
+        return DemandItemIn(
+            key=facts,
+            readings=tuple(i.readings),
+            confirmation_item=i.confirmation_item,
+        )
     key = (
         DescriptionKey(
             i.key.subject,
