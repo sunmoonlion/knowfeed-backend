@@ -274,14 +274,15 @@ class Settings(BaseSettings):
     supply_global_rate_per_minute: int = Field(
         default=60, ge=1, le=6000, validation_alias="SUPPLY_GLOBAL_RATE_PER_MINUTE"
     )
-    # 渲染工作负载（SDD 0045 第 3.2 节「无头浏览器放 knowfeed 自己的一个单独工作负载」；
-    # decisions 10-29「发版前补齐」④：工作负载与出网规则由平台起）。地址没配就不渲染，
-    # 要渲染的渠道照实回 render_unavailable
+    # Wind 服务端渠道（#82）：账号密钥只从私有配置读；渠道登记的 owner_subject 要和它一致
     wind_api_key: SecretStr = Field(
         default=SecretStr(""), validation_alias="WIND_API_KEY"
     )
     wind_owner_subject: str = Field(default="", validation_alias="WIND_OWNER_SUBJECT")
 
+    # 渲染工作负载（SDD 0045 第 3.2 节「无头浏览器放 knowfeed 自己的一个单独工作负载」；
+    # decisions 10-29「发版前补齐」④：工作负载与出网规则由平台起）。地址没配就不渲染，
+    # 要渲染的渠道照实回 render_unavailable
     supply_render_url: str = Field(default="", validation_alias="SUPPLY_RENDER_URL")
     supply_render_timeout_seconds: float = Field(
         default=60.0, gt=0, le=300, validation_alias="SUPPLY_RENDER_TIMEOUT_SECONDS"

@@ -372,12 +372,14 @@ class AuthService:
             raise ServiceUnavailableError(
                 "Token exchange is not available", code="token_exchange_unavailable"
             )
-        subject = await self._sessions.read(
+        access_token = await self._sessions.read(
             f"{self._profile.session_key_prefix}{session_id}{ACCESS_TOKEN_SUFFIX}"
         )
-        if not subject:
+        if not access_token:
             raise UnauthorizedError("Sign in again to continue", code="reauth_required")
-        return await self._oidc.exchange_token(subject_token=subject, audience=audience)
+        return await self._oidc.exchange_token(
+            subject_token=access_token, audience=audience
+        )
 
     @property
     def post_logout_redirect_uri(self) -> str:
